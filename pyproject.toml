@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hrbust-cli"
+version = "1.0.0"
+description = "哈尔滨理工大学（HRBUST）数字化校园全栈开源 CLI 与 SDK 工具箱"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "Haiying Kou (Wdclouds)" }
+]
+dependencies = [
+    "requests>=2.28.0",
+    "beautifulsoup4>=4.11.0",
+    "ddddocr>=1.4.7",
+    "pycryptodome>=3.18.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+]
+
+[project.scripts]
+hrbust = "hrbust.cli.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hrbust"]
