@@ -69,5 +69,9 @@ async def run_smoke_test():
     print("\n🎉 [PASS] HRBUST TUI 全链路自动化冒烟测试 100% 成功通过！\n")
 
 
+def test_tui_smoke():
+    """Pytest 标准用例入口"""
+    asyncio.run(run_smoke_test())
+
 if __name__ == "__main__":
     asyncio.run(run_smoke_test())
