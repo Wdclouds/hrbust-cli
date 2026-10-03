@@ -1,4 +1,4 @@
-/* HRBUST TUI 现代暗黑极客主题样式表 */
+/* HRBUST TUI 现代暗黑极客命令中枢主题样式表 */
 
 Screen {
     background: #0b0f19;
@@ -20,50 +20,175 @@ Footer {
     dock: bottom;
 }
 
-TabbedContent {
+/* 顶部状态通知条 */
+.top-status-bar {
+    height: 3;
+    background: #0f172a;
+    border-bottom: solid #1e293b;
+    padding: 0 2;
+    align: center middle;
+    dock: top;
+}
+
+/* 核心两列水平分割布局 */
+.layout-columns {
     height: 1fr;
 }
 
-TabPane {
+/* 左侧 3/4 主命令甲板 */
+#main-deck {
+    width: 75%;
+    height: 1fr;
     padding: 1 2;
     background: #0b0f19;
 }
 
-/* 顶部状态通知条 */
-.status-bar {
-    height: 3;
+/* 工作空间视图容器 */
+#workspace-view {
+    height: 1fr;
+}
+
+/* 居中大 Logo 与引导卡片 */
+#hero-view {
+    width: 100%;
+    height: 100%;
+    align: center middle;
+    content-align: center middle;
+}
+
+.ascii-logo {
+    color: #38bdf8;
+    text-style: bold;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+.hero-subtitle {
+    color: #94a3b8;
+    text-align: center;
+    margin-bottom: 2;
+}
+
+.quick-guide-panel {
     background: #111827;
     border: solid #1e293b;
-    padding: 0 1;
-    margin-bottom: 1;
+    padding: 1 2;
+    width: 80%;
     align: center middle;
 }
 
-.network-badge-ok {
-    color: #10b981;
+.guide-title {
+    color: #38bdf8;
+    text-style: bold;
+    text-align: center;
+    margin-bottom: 1;
+}
+
+.guide-item {
+    color: #cbd5e1;
+    margin-bottom: 1;
+}
+
+.guide-cmd {
+    color: #facc15;
+    text-style: bold;
+    background: #000000;
+    padding: 0 1;
+}
+
+/* 各业务视图卡片 */
+.view-panel {
+    width: 100%;
+    height: 100%;
+}
+
+.view-header-bar {
+    height: 3;
+    align: left middle;
+    margin-bottom: 1;
+}
+
+.view-header-title {
+    color: #38bdf8;
     text-style: bold;
 }
 
-.network-badge-err {
-    color: #ef4444;
+/* 最下方常驻命令输入条 */
+#command-container {
+    height: 3;
+    margin-top: 1;
+    background: #111827;
+    border: solid #0284c7;
+    padding: 0 1;
+    align: left middle;
+}
+
+#command-prompt-symbol {
+    width: 3;
+    color: #0ea5e9;
     text-style: bold;
 }
 
-/* 布局卡片 */
-.panel-box {
+#command-input {
+    width: 1fr;
+    background: transparent;
+    border: none;
+    color: #f8fafc;
+    padding: 0;
+}
+
+#command-input:focus {
+    border: none;
+}
+
+/* 右侧 1/4 学校公告栏 */
+#news-sidebar {
+    width: 25%;
+    height: 1fr;
+    background: #0f172a;
+    border-left: solid #1e293b;
+    padding: 1;
+}
+
+.sidebar-header {
+    height: 3;
+    border-bottom: solid #1e293b;
+    align: left middle;
+    margin-bottom: 1;
+}
+
+.sidebar-title {
+    color: #38bdf8;
+    text-style: bold;
+}
+
+#news-scroll-container {
+    height: 1fr;
+}
+
+.news-card {
     background: #111827;
     border: solid #1e293b;
     padding: 1;
     margin-bottom: 1;
 }
 
-.panel-title {
+.news-card:hover {
+    border: solid #38bdf8;
+    background: #1e293b;
+}
+
+.news-date {
+    color: #f59e0b;
     text-style: bold;
-    color: #38bdf8;
     margin-bottom: 1;
 }
 
-/* 表格样式 */
+.news-title {
+    color: #f1f5f9;
+}
+
+/* 表格与结果面板 */
 DataTable {
     background: #111827;
     border: solid #1e293b;
@@ -82,13 +207,12 @@ DataTable > .datatable--cursor {
     text-style: bold;
 }
 
-/* 按钮与交互控件 */
 Button {
     background: #1e293b;
     color: #f1f5f9;
     border: none;
     height: 3;
-    min-width: 14;
+    min-width: 12;
     margin-right: 1;
 }
 
@@ -103,70 +227,18 @@ Button.primary {
     text-style: bold;
 }
 
-Button.primary:hover {
-    background: #0369a1;
-}
-
-Button.success {
-    background: #059669;
-    color: #ffffff;
-    text-style: bold;
-}
-
-Button.danger {
-    background: #dc2626;
-    color: #ffffff;
-}
-
-Input {
-    background: #1e293b;
-    color: #f8fafc;
-    border: solid #334155;
-    padding: 0 1;
-    height: 3;
-}
-
-Input:focus {
-    border: solid #38bdf8;
-}
-
-Select {
-    background: #1e293b;
-    color: #f8fafc;
-    border: solid #334155;
-    height: 3;
-}
-
-/* 控制栏行 */
-.toolbar-row {
-    height: 3;
-    margin-bottom: 1;
-    align: left middle;
-}
-
-/* 水控出码展示大卡片 */
 .voucher-card {
     background: #1e293b;
     border: solid #10b981;
     padding: 1 2;
     margin-top: 1;
-    height: auto;
+    height: 4;
     align: center middle;
 }
 
-.voucher-code {
-    text-style: bold;
-    color: #facc15;
-    background: #000000;
-    padding: 0 2;
-    margin: 1 0;
-}
-
-/* 详情预览视窗 */
-.detail-preview {
-    background: #0f172a;
-    border: dashed #334155;
-    padding: 1;
-    height: 7;
-    margin-top: 1;
+.panel-box {
+    background: #111827;
+    border: solid #1e293b;
+    padding: 1 2;
+    margin-bottom: 1;
 }
