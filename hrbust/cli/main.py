@@ -251,8 +251,19 @@ def daily(
 
     console.print(table)
 
+@app.command(name="tui")
+def tui():
+    """启动 HRBUST 全屏交互式终端中枢大盘 (TUI)"""
+    from ..tui.app import run_tui
+    run_tui()
+
 def run():
-    app()
+    if len(sys.argv) == 1:
+        # 直接敲 hrbust 默认优雅切入交互式全屏 TUI 大盘
+        from ..tui.app import run_tui
+        run_tui()
+    else:
+        app()
 
 if __name__ == "__main__":
     run()
