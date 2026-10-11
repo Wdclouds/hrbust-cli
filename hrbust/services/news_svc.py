@@ -94,3 +94,10 @@ class NewsService:
             item["type"] = "教学新闻"
             brief.append(item)
         return brief
+
+    def get_daily_briefing(self) -> Dict[str, Any]:
+        """返回按分类整理的每日简报字典"""
+        return {
+            "notices": self.get_articles(self.COL_NOTICE, page=1)[:5],
+            "news": self.get_articles(self.COL_NEWS, page=1)[:5],
+        }

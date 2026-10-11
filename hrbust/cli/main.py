@@ -257,18 +257,6 @@ def tui():
     from ..tui.app import run_tui
     run_tui()
 
-def run():
-    if len(sys.argv) == 1:
-        # 直接敲 hrbust 默认优雅切入交互式全屏 TUI 大盘
-        from ..tui.app import run_tui
-        run_tui()
-    else:
-        app()
-
-if __name__ == "__main__":
-    run()
-
-
 @app.command("logout")
 def logout():
     """登出并彻底清空本地安全保险箱凭据"""
@@ -292,3 +280,14 @@ def status():
     table.add_row("水控凭据", "已就绪" if (w_info and w_tok) else "[dim]未配置[/dim]")
     table.add_row("底层存储", "机器特征绑定 AES-256-GCM 密文保险箱 (0600)")
     console.print(table)
+
+def run():
+    if len(sys.argv) == 1:
+        # 直接敲 hrbust 默认优雅切入交互式全屏 TUI 大盘
+        from ..tui.app import run_tui
+        run_tui()
+    else:
+        app()
+
+if __name__ == "__main__":
+    run()

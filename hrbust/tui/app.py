@@ -56,7 +56,7 @@ class HrbustTuiApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "退出", show=True),
-        Binding("escape", "show_home", "返回主页", show=True),
+        Binding("escape", "show_home", "返回主页", show=True, priority=True),
         Binding("r", "refresh_active", "刷新数据", show=True),
     ]
 
@@ -228,9 +228,12 @@ class HrbustTuiApp(App):
             brief = self.news_svc.get_daily_brief()
             self.call_from_thread(self._render_sidebar_news, brief)
         except Exception as e:
-            self.call_from_thread(
-                lambda: self.query_one("#news-loading-hint", Label).update(f"[red]动态拉取失败: {e}[/red]")
-            )
+            def _update_err():
+                try:
+                    self.query_one("#news-loading-hint", Label).update(f"[red]动态拉取失败: {e}[/red]")
+                except Exception:
+                    pass
+            self.call_from_thread(_update_err)
 
     def _render_sidebar_news(self, items: List[Dict[str, Any]]) -> None:
         container = self.query_one("#news-scroll-container", VerticalScroll)
@@ -241,9 +244,11 @@ class HrbustTuiApp(App):
             return
 
         for item in items[:12]:
-            card = Vertical(classes="news-card")
-            card.mount(Label(f"[{item.get('type', '通告')}] · {item.get('date', '今日')}", classes="news-date"))
-            card.mount(Label(item.get("title", ""), classes="news-title"))
+            card = Vertical(
+                Label(f"[{item.get('type', '通告')}] · {item.get('date', '今日')}", classes="news-date"),
+                Label(item.get("title", ""), classes="news-title"),
+                classes="news-card",
+            )
             container.mount(card)
 
     # ==================== 底部命令输入条交互 ====================
