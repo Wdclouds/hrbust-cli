@@ -144,6 +144,11 @@ class HrbustTuiApp(App):
                             with Vertical(classes="panel-box"):
                                 yield Label("💧 [bold cyan]一卡通水控 Token 凭据[/bold cyan]")
                                 yield Label("水控凭据状态: [dim]探测中...[/dim]", id="status-deck-water")
+                            with Vertical(classes="panel-box"):
+                                yield Label("💡 [bold yellow]快捷配置指引[/bold yellow]")
+                                yield Label("• 绑定教务: 底部输入 [bold cyan]login <学号> <密码>[/bold cyan]")
+                                yield Label("• 绑定水控: 底部输入 [bold cyan]token <Token串>[/bold cyan]")
+                                yield Label("• 清空销毁: 底部输入 [bold cyan]logout[/bold cyan]")
 
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
@@ -286,31 +291,85 @@ class HrbustTuiApp(App):
         elif cmd in ("news", "notice"):
             self.switch_to_view("news")
             self.action_fetch_news_data()
-        elif cmd in ("status", "auth", "login"):
+        elif cmd == "login":
+            if len(args) < 2:
+                self.notify("格式错误: login <学号> <密码>", title="参数不足", severity="warning")
+                self.switch_to_view("status")
+            else:
+                u, p = args[0], args[1]
+                set_credentials(u, p)
+                self.jwzx_engine = None
+                self._update_status_bar()
+                self.notify(f"学号 {u} 凭据已保存，正在后台尝试登录...", title="账号配置", severity="information")
+                self.switch_to_view("status")
+                self.action_test_jwzx_login(u, p)
+        elif cmd in ("token", "water-token"):
+            if not args:
+                self.notify("格式错误: token <水控Token>", title="参数不足", severity="warning")
+                self.switch_to_view("status")
+            else:
+                tok = args[0]
+                raw_info, _ = get_water_token()
+                set_water_token(raw_info or "", tok)
+                self._update_status_bar()
+                self.notify("水控 Token 已更新！输入 water 可测试拉取大盘", title="凭据保存", severity="information")
+                self.switch_to_view("water")
+                self.action_fetch_water_data()
+        elif cmd == "logout":
+            clear_all_credentials()
+            self.jwzx_engine = None
+            self._update_status_bar()
+            self.notify("已成功登出并清空所有本地密文凭据", title="安全登出", severity="information")
+            self.switch_to_view("status")
+        elif cmd in ("status", "auth"):
             self._update_status_bar()
             self.switch_to_view("status")
         elif cmd in ("help", "?"):
             self.action_show_home()
-            self.notify("快捷命令: water | room 南一 | today | news | status | home | exit", title="命令帮助")
+            self.notify("指令: water | room 南一 | today | news | login <学号> <密码> | token <Token> | status | logout | exit", title="命令帮助")
         else:
             self.notify(f"未识别指令 '{cmd}'，请输入 help 查看可用命令", title="命令提示", severity="warning")
 
     # ==================== 数据拉取与渲染 Workers ====================
 
     @work(thread=True)
+    def action_test_jwzx_login(self, u: str, p: str) -> None:
+        """后台验证教务在线登录态"""
+        engine = JwzxEngine()
+        success = engine.login(u, p)
+        if success:
+            self.jwzx_engine = engine
+            self.notify(f"教务系统登录成功！现在可使用 room 或 today 命令", title="登录验证通过", severity="information")
+        else:
+            self.notify("教务在线登录失败：请检查学号密码或内网连接", title="登录失败", severity="error")
+
+    @work(thread=True)
     def action_fetch_water_data(self) -> None:
         """后台拉取水控数据并渲染"""
+        u, _ = get_credentials()
+        w_info, w_tok = get_water_token()
+        if not w_tok:
+            self.notify("未配置水控 Token！可在底部输入 token <你的Token>", title="水控系统", severity="warning")
+            def _show_empty_token():
+                table = self.query_one("#table-water-deck", DataTable)
+                table.clear()
+                table.add_row("-", "未配置水控 Token (在底部输入: token <你的Token>)", "0 台", "0%", "未配置")
+            self.call_from_thread(_show_empty_token)
+            return
+
         try:
-            u, _ = get_credentials()
-            w_info, w_tok = get_water_token()
-            token = w_tok or "default_guest_token"
             account = u or "2101010101"
             raw_info = w_info or self.water_engine.aes_encrypt(account, account)
-            status_list = self.water_svc.get_dashboard(raw_info, token)
+            status_list = self.water_svc.get_dashboard(raw_info, w_tok)
             self.current_water_status = status_list
             self.call_from_thread(self._populate_water_table, status_list)
         except Exception as e:
-            self.notify(f"水控大盘获取异常: {e}", title="水控系统", severity="warning")
+            self.notify(f"水控大盘异常: {e} (若Token失效请重新设置)", title="水控系统", severity="warning")
+            def _show_err():
+                table = self.query_one("#table-water-deck", DataTable)
+                table.clear()
+                table.add_row("!", f"拉取失败: {e} (Token可能已过期)", "0 台", "0%", "异常")
+            self.call_from_thread(_show_err)
 
     def _populate_water_table(self, items: List[Dict[str, Any]]) -> None:
         table = self.query_one("#table-water-deck", DataTable)
@@ -376,16 +435,29 @@ class HrbustTuiApp(App):
         """后台拉取教室资源"""
         default_b = RoomService.BUILDINGS["南一"]
         b_info = RoomService.BUILDINGS.get(building) or default_b
+
+        u, p = get_credentials()
+        if not u or not p:
+            self.notify("未绑定教务账号！请在底部输入: login <学号> <密码>", title="需要登录", severity="warning")
+            def _show_no_auth():
+                table = self.query_one("#table-room-deck", DataTable)
+                self.query_one("#label-room-title", Label).update(f"🏫 [bold cyan]{b_info['name']} 教室资源池 (需要登录)[/bold cyan]")
+                table.clear()
+                table.add_row("-", "未绑定教务账号，请在底部键入: login <学号> <密码>", "未配置", b_info["name"])
+            self.call_from_thread(_show_no_auth)
+            return
+
         self.notify(f"正在检索 {b_info['name']} 教室资源池...", title="自习教室")
         try:
             if not self.jwzx_engine:
-                u, p = get_credentials()
-                if not u or not p:
-                    self.notify("请在 status 命令中配置教务账号密码", severity="warning")
-                    return
                 self.jwzx_engine = JwzxEngine()
                 if not self.jwzx_engine.login(u, p):
                     self.notify("教务在线自动打码登录失败", severity="error")
+                    def _show_login_fail():
+                        table = self.query_one("#table-room-deck", DataTable)
+                        table.clear()
+                        table.add_row("!", "教务在线登录失败，请检查账号密码或验证码", "异常", b_info["name"])
+                    self.call_from_thread(_show_login_fail)
                     return
 
             room_svc = RoomService(self.jwzx_engine)
@@ -397,6 +469,11 @@ class HrbustTuiApp(App):
             self.notify(f"检索到 {len(rooms)} 间教室资源", title="自习教室", severity="information")
         except Exception as e:
             self.notify(f"检索教室失败: {e}", severity="error")
+            def _show_fetch_err():
+                table = self.query_one("#table-room-deck", DataTable)
+                table.clear()
+                table.add_row("!", f"检索教室失败: {e}", "异常", b_info["name"])
+            self.call_from_thread(_show_fetch_err)
 
     def _populate_room_table(self, rooms: List[Dict[str, Any]], b_name: str) -> None:
         table = self.query_one("#table-room-deck", DataTable)
@@ -411,7 +488,12 @@ class HrbustTuiApp(App):
         """后台拉取课表数据"""
         u, p = get_credentials()
         if not u or not p:
-            self.notify("未绑定教务账号，请输入 status 进行配置", severity="warning")
+            self.notify("未绑定教务账号！请在底部输入: login <学号> <密码>", title="需要登录", severity="warning")
+            def _show_no_sched():
+                table = self.query_one("#table-schedule-deck", DataTable)
+                table.clear()
+                table.add_row("-", "未绑定教务账号，请在底部键入: login <学号> <密码>", "未配置", "-", "-")
+            self.call_from_thread(_show_no_sched)
             return
 
         self.notify("正在登录教务在线同步大课表...", title="学业课表")
@@ -420,6 +502,11 @@ class HrbustTuiApp(App):
                 self.jwzx_engine = JwzxEngine()
                 if not self.jwzx_engine.login(u, p):
                     self.notify("教务在线自动登录失败", severity="error")
+                    def _show_login_fail():
+                        table = self.query_one("#table-schedule-deck", DataTable)
+                        table.clear()
+                        table.add_row("!", "教务在线登录失败，请检查账号密码或验证码", "异常", "-", "-")
+                    self.call_from_thread(_show_login_fail)
                     return
 
             svc = ScheduleService(self.jwzx_engine)
@@ -428,6 +515,11 @@ class HrbustTuiApp(App):
             self.notify(f"课表同步完成，共计 {len(courses)} 门课程", title="学业课表", severity="information")
         except Exception as e:
             self.notify(f"课表拉取失败: {e}", severity="error")
+            def _show_fetch_err():
+                table = self.query_one("#table-schedule-deck", DataTable)
+                table.clear()
+                table.add_row("!", f"课表拉取失败: {e}", "异常", "-", "-")
+            self.call_from_thread(_show_fetch_err)
 
     def _populate_schedule_table(self, courses: List[Dict[str, Any]]) -> None:
         table = self.query_one("#table-schedule-deck", DataTable)

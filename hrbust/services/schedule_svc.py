@@ -29,13 +29,25 @@ class ScheduleService:
                         continue
                     lines = [l.strip() for l in text.splitlines() if l.strip()]
                     if len(lines) >= 2:
+                        course_name = lines[0]
+                        teacher = lines[1] if len(lines) > 1 else ""
+                        room = lines[-1] if len(lines) > 2 else ""
                         courses.append({
-                            "title": lines[0],
-                            "teacher": lines[1] if len(lines) > 1 else "",
-                            "classroom": lines[-1] if len(lines) > 2 else "",
-                            "raw": text
+                            "title": course_name,
+                            "name": course_name,
+                            "teacher": teacher,
+                            "classroom": room,
+                            "room": room,
+                            "raw": text,
+                            "day_of_week": "",
+                            "session": "",
+                            "weeks": "",
                         })
         return courses
+
+    def get_current_timetable(self) -> List[Dict[str, Any]]:
+        """获取当前学期大课表（别名兼顾 CLI）"""
+        return self.get_timetable()
 
     def get_curriculum_plan(self) -> List[Dict[str, Any]]:
         """
