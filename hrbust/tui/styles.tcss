@@ -25,9 +25,14 @@ Footer {
     height: 3;
     background: #0f172a;
     border-bottom: solid #1e293b;
-    padding: 0 2;
-    align: center middle;
+    padding: 0 1;
+    align: left middle;
     dock: top;
+}
+
+.top-status-bar Static {
+    width: auto;
+    margin-right: 2;
 }
 
 /* 核心两列水平分割布局 */
@@ -167,10 +172,16 @@ Footer {
 }
 
 .news-card {
+    height: auto;
     background: #111827;
     border: solid #1e293b;
-    padding: 1;
+    padding: 0 1;
     margin-bottom: 1;
+}
+
+.news-card Label {
+    height: auto;
+    width: 100%;
 }
 
 .news-card:hover {
@@ -237,8 +248,14 @@ Button.primary {
 }
 
 .panel-box {
+    height: auto;
     background: #111827;
     border: solid #1e293b;
-    padding: 1 2;
+    padding: 0 1;
     margin-bottom: 1;
+}
+
+.panel-box Label {
+    height: auto;
+    width: 100%;
 }
