@@ -196,20 +196,23 @@ class HrbustTuiApp(App):
 
     def _update_status_bar(self) -> None:
         """刷新顶部状态指示条"""
-        u, _ = get_credentials()
-        _, w_tok = get_water_token()
-        is_campus = check_campus_network()
-        net_text = "🟢 [bold green]已直连校园网[/bold green]" if is_campus else "🟡 [bold yellow]外部网络/代理[/bold yellow]"
-        self.query_one("#net-status-label", Static).update(f"🌐 [bold]校园网:[/bold] {net_text}")
+        try:
+            u, _ = get_credentials()
+            _, w_tok = get_water_token()
+            is_campus = check_campus_network()
+            net_text = "🟢 [bold green]已直连校园网[/bold green]" if is_campus else "🟡 [bold yellow]外部网络/代理[/bold yellow]"
+            self.query_one("#net-status-label", Static).update(f"🌐 [bold]校园网:[/bold] {net_text}")
 
-        user_text = f"[bold green]{u}[/bold green]" if u else "[dim]未绑定[/dim]"
-        self.query_one("#user-status-label", Static).update(f"  |  👤 [bold]学号:[/bold] {user_text}")
+            user_text = f"[bold green]{u}[/bold green]" if u else "[dim]未绑定[/dim]"
+            self.query_one("#user-status-label", Static).update(f"  |  👤 [bold]学号:[/bold] {user_text}")
 
-        water_text = "[bold green]已就绪[/bold green]" if w_tok else "[dim]未配置[/dim]"
-        self.query_one("#water-status-label", Static).update(f"  |  💧 [bold]水控凭据:[/bold] {water_text}")
+            water_text = "[bold green]已就绪[/bold green]" if w_tok else "[dim]未配置[/dim]"
+            self.query_one("#water-status-label", Static).update(f"  |  💧 [bold]水控凭据:[/bold] {water_text}")
 
-        self.query_one("#status-deck-user", Label).update(f"当前绑定学号: {user_text}")
-        self.query_one("#status-deck-water", Label).update(f"水控凭据状态: {water_text}")
+            self.query_one("#status-deck-user", Label).update(f"当前绑定学号: {user_text}")
+            self.query_one("#status-deck-water", Label).update(f"水控凭据状态: {water_text}")
+        except Exception:
+            pass
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
