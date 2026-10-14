@@ -80,7 +80,7 @@ def water():
 
     with console.status("[cyan]正在获取浴场实时空闲大盘...[/cyan]"):
         try:
-            status_list = svc.get_dashboard(raw_info or account, token)
+            status_list = svc.get_dashboard(account, token)
         except Exception as e:
             console.print(f"[bold red][错误] 获取浴场状态异常: {e}[/bold red]")
             raise typer.Exit(code=1)

@@ -517,7 +517,7 @@ class HrbustTuiApp(App):
             if not account:
                 cas_u, _ = get_cas_credentials()
                 account = cas_u or u or "16264"
-            status_list = self.water_svc.get_dashboard(w_info or account, w_tok)
+            status_list = self.water_svc.get_dashboard(account, w_tok)
             self.current_water_status = status_list
             self.call_from_thread(self._populate_water_table, status_list)
         except Exception as e:
