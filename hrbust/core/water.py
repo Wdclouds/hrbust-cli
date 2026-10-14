@@ -50,6 +50,25 @@ class WaterEngine:
         encrypted = cipher.encrypt(padded)
         return base64.b64encode(encrypted).decode("utf-8")
 
+    def generate_token(self, account: str) -> str:
+        """
+        根据物理一卡通卡号与硬件私钥动态生成 5 分钟业务 Token
+        零 Cookie、零密码依赖，毫秒级就绪
+        """
+        import json
+        import datetime
+        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        tok_payload = {
+            "userid": str(account),
+            "userpassword": self.SIGN_PASSWORD,
+            "time": time_str
+        }
+        enc_tok = self.aes_encrypt(json.dumps(tok_payload, separators=(",", ":")), self.PKEY_B64)
+        res = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_tok}, timeout=8).json()
+        if res.get("RetNo") == 0 and res.get("Token"):
+            return res.get("Token")
+        raise RuntimeError(f"生成水控Token失败: {res.get('RetDsp', '未知错误')}")
+
     def get_bath_status(self, raw_info: str, token: str) -> List[Dict[str, Any]]:
         """
         获取全校各浴室与热水的实时机位与空闲率大盘
@@ -74,6 +93,7 @@ class WaterEngine:
                 "warn_positions": item.get("WarnPosNum", 0),
                 "free_rate": use_free_rate,
                 "book_rate": book_rate,
+                "act_kind": item.get("Actkind", 0),
                 "book_code": item.get("BookCode", "")
             })
         return result

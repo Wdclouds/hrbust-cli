@@ -534,7 +534,13 @@ class HrbustTuiApp(App):
         for idx, item in enumerate(items, 1):
             free_rate = item.get("free_rate", 0.0)
             rate_pct = free_rate if free_rate > 1.0 else free_rate * 100.0
-            if rate_pct > 70:
+            act_kind = item.get("act_kind", 0)
+            book_code = item.get("book_code", "")
+
+            if act_kind == 1 and book_code:
+                status_text = f"[bold yellow on black] 已约 {book_code} (Enter取消) [/bold yellow on black]"
+                rate_text = f"[bold yellow]{rate_pct:.1f}%[/bold yellow]"
+            elif rate_pct > 70:
                 rate_text = f"[green]{rate_pct:.1f}%[/green]"
                 status_text = "[bold green]极佳 · 无需排队[/bold green]"
             elif rate_pct > 30:
@@ -555,7 +561,7 @@ class HrbustTuiApp(App):
 
     @work(thread=True)
     def action_book_water_from_deck(self) -> None:
-        """从主命令台一键预约出水码"""
+        """从主命令台一键预约出水码或取消已有预约"""
         table = self.query_one("#table-water-deck", DataTable)
         if table.row_count == 0:
             self.notify("大盘暂无数据，请先刷新", severity="warning")
@@ -570,8 +576,30 @@ class HrbustTuiApp(App):
         if not account:
             cas_u, _ = get_cas_credentials()
             account = cas_u or u or "16264"
-        token = w_tok or "default_token"
+        token = w_tok or ""
 
+        # 1. 如果当前选中的场所已经被自己预约占用 -> 执行一键取消释放机位
+        if target.get("act_kind") == 1 or target.get("book_code"):
+            self.notify(f"正在申请取消 {target['name']} 的预约占用...", title="释放机位")
+            try:
+                res = self.water_svc.cancel_bath(target["class_no"], account, token)
+                if res.get("success") or res.get("RetNo") == 0:
+                    self.notify(f"✔ 已成功取消 {target['name']} 预约，机位已释放！", title="取消成功", severity="information")
+                    self.action_fetch_water_data()
+                else:
+                    msg = res.get("RetDsp") or res.get("msg") or "取消失败"
+                    self.notify(f"取消预约失败: {msg}", title="取消回执", severity="error")
+            except Exception as e:
+                self.notify(f"取消预约异常: {e}", severity="error")
+            return
+
+        # 2. 如果在其他场所已经有生效中的预约码 -> 提示冲突
+        active_other = next((it for it in self.current_water_status if (it.get("act_kind") == 1 or it.get("book_code")) and it.get("class_no") != target["class_no"]), None)
+        if active_other:
+            self.notify(f"你当前在【{active_other['name']}】已有生效中的预约码 {active_other.get('book_code')}，请先选中它按回车取消后再预约新场所！", title="机位占用冲突", severity="warning")
+            return
+
+        # 3. 正常发起出水码预约
         self.notify(f"正在申请 {target['name']} 出水预约码...", title="水控预约")
         try:
             res = self.water_svc.book_bath(target["class_no"], account, token)
@@ -580,11 +608,12 @@ class HrbustTuiApp(App):
                 code = res.get("BookCode") or res.get("book_code") or "8888"
                 self.call_from_thread(self._render_deck_voucher, target["name"], code)
                 self.notify(f"预约成功！出水码: {code}", title="出码成功", severity="information")
+                self.action_fetch_water_data()
             else:
                 msg = res.get("RetDsp") or res.get("msg") or "预约失败"
                 self.notify(f"预约失败: {msg}", title="预约回执", severity="error")
         except Exception as e:
-            self.notify(f"预约异常: {e}", severity="error")
+            self.notify(f"预约请求异常: {e}", title="水控异常", severity="error")
 
     def _render_deck_voucher(self, place_name: str, code: str) -> None:
         self.query_one("#voucher-deck-label", Label).update(
@@ -1072,10 +1101,12 @@ class HrbustTuiApp(App):
                     try:
                         self.query_one("#label-cas-submit-status", Label).update(f"[bold green]✔ 办事大厅认证成功！已绑定一卡通卡号: {acc}[/bold green]")
                         self._update_status_bar()
+                        self.switch_to_view("water")
+                        self.action_fetch_water_data()
                     except Exception:
                         pass
                 self.call_from_thread(_set_ok)
-                self.notify(f"✔ 网上办事大厅认证成功！一卡通卡号: {acc}", title="认证成功", severity="information")
+                self.notify(f"✔ 网上办事大厅认证成功！一卡通卡号: {acc}，正在为你展开浴室大盘...", title="认证成功", severity="information")
             else:
                 err = res.get('msg', '未知原因')
                 def _set_fail():

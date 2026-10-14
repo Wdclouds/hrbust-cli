@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 from rich import box
 from rich.panel import Panel
-from rich.prompt import Prompt
+from rich.prompt import Prompt, Confirm
 
 from ..core.network import check_campus_network
 from ..core.auth import get_credentials, set_credentials, get_water_token, set_water_token
@@ -92,13 +92,24 @@ def water():
     table.add_column("空闲率", justify="center")
     table.add_column("状态建议", justify="center")
 
+    active_reservation = None
     mapping = {}
     for idx, item in enumerate(status_list, 1):
         mapping[str(idx)] = item
+        if item.get("act_kind") == 1 or item.get("book_code"):
+            active_reservation = item
         free_rate = item["free_rate"]
         # 兼容百分比数值 (85.48) 与小数 (0.8548)
         rate_pct = free_rate if free_rate > 1.0 else free_rate * 100.0
-        advice = "[green]极佳无需排队[/green]" if rate_pct > 70 else ("[yellow]正常[/yellow]" if rate_pct > 30 else "[red]拥挤爆满[/red]")
+        if item.get("act_kind") == 1 and item.get("book_code"):
+            advice = f"[bold yellow on black] 已约 {item['book_code']} [/bold yellow on black]"
+        elif rate_pct > 70:
+            advice = "[green]极佳无需排队[/green]"
+        elif rate_pct > 30:
+            advice = "[yellow]正常[/yellow]"
+        else:
+            advice = "[red]拥挤爆满[/red]"
+
         table.add_row(
             str(idx),
             item["name"],
@@ -108,13 +119,48 @@ def water():
         )
 
     console.print(table)
-    console.print("[dim][0] 仅查看大盘，直接退出[/dim]")
-    choice = Prompt.ask("请选择你要预约的场所编号 [1-5]", default="0")
+
+    if active_reservation:
+        console.print(Panel(
+            f"[bold yellow]⚠️ 检测到当前已有生效中的出水预约码！[/bold yellow]\n\n"
+            f"场所名称: [bold]{active_reservation['name']}[/bold]\n"
+            f"有效预约码: [bold yellow on black] {active_reservation['book_code']} [/bold yellow on black]\n"
+            f"机位状态: 占用生效中（按学校规定同一学生只能同时占用 1 个有效码）\n"
+            f"快捷操作: 输入 [bold red]C[/bold red] 回车可一键取消当前预约、释放占用",
+            title="当前机位占用通知",
+            border_style="yellow"
+        ))
+        console.print("[dim][0] 仅查看大盘退出  |  [C] 立即取消当前预约释放机位  |  [1-5] 重新选择[/dim]")
+        choice = Prompt.ask("请选择操作编号 [0/C/1-5]", default="0")
+        if choice.upper() == "C":
+            with console.status(f"[cyan]正在为账号 {account} 取消 {active_reservation['name']} 预约...[/cyan]"):
+                c_res = svc.cancel_bath(active_reservation["class_no"], account, token)
+            if c_res.get("success") or c_res.get("RetNo") == 0:
+                console.print(f"[bold green]✔ 已成功取消 {active_reservation['name']} 的预约，机位已释放！现在可以预约新场所。[/bold green]")
+            else:
+                console.print(f"[bold red]❌ 取消失败: {c_res.get('msg') or c_res.get('RetDsp')}[/bold red]")
+            return
+    else:
+        console.print("[dim][0] 仅查看大盘，直接退出[/dim]")
+        choice = Prompt.ask("请选择你要预约的场所编号 [1-5]", default="0")
+
     if choice == "0" or choice not in mapping:
         console.print("[cyan]已退出。[/cyan]")
         return
 
     target = mapping[choice]
+    if target.get("act_kind") == 1 and target.get("book_code"):
+        # 当前选中的正好是已预约场所 -> 提示取消
+        confirm_cancel = Confirm.ask(f"该场所当前已被你预约占用 (码: {target['book_code']})，是否取消预约释放机位？", default=True)
+        if confirm_cancel:
+            with console.status(f"[cyan]正在取消 {target['name']} 的预约占用...[/cyan]"):
+                res = svc.cancel_bath(target["class_no"], account, token)
+            if res.get("success") or res.get("RetNo") == 0:
+                console.print(f"[bold green]✔ 已成功取消预约，机位已释放！[/bold green]")
+            else:
+                console.print(f"[bold red]❌ 取消失败: {res.get('msg') or res.get('RetDsp')}[/bold red]")
+        return
+
     with console.status(f"[cyan]正在为账号 {account} 申请 {target['name']} 预约码...[/cyan]"):
         res = svc.book_bath(target["class_no"], account, token)
 
