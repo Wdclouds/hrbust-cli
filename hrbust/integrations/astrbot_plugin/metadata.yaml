@@ -1,0 +1,39 @@
+name: astrbot_plugin_hrbust
+version: "1.2.0"
+author: "Haiying Kou (Wdclouds)"
+description: "哈尔滨理工大学（HRBUST）数字化校园微信机器人插件：支持查水控/浴室预约出码、查成绩GPA、查期末考场座位号、查一卡通消费账单、查课表、空教室自习室与增量教务公告推送。"
+main: main:AstrBotHrbustPlugin
+repo: "https://github.com/Wdclouds/hrbust-cli"
+keywords:
+  - hrbust
+  - 哈理工
+  - 校园助手
+  - 水控预约
+  - 成绩查询
+  - 考场座位
+  - 一卡通
+commands:
+  - name: 查浴室
+    description: "查看全校 5 大浴场与热水机位实时空闲率"
+  - name: 约洗澡 [场所名称]
+    description: "申请浴室有效出水预约码 (例如: 约洗澡 南区男浴)"
+  - name: 取消预约
+    description: "取消名下当前正在生效中的水房预约占用并释放机位"
+  - name: 查成绩
+    description: "查询本科至今所有学期成绩单、学分与官方加权 GPA"
+  - name: 查考试
+    description: "查询期末/期中考试科目、考试时间地点与座位号"
+  - name: 查消费
+    description: "查看一卡通近期洗浴与热水消费流水账单与累计支出"
+  - name: 查学分
+    description: "审查本科专业培养方案毕业学分完成度与尚欠学分"
+  - name: 查教室 [教学楼]
+    description: "检索空闲自习室并高亮多媒体机房 (例如: 查教室 南一)"
+  - name: 查课表
+    description: "查看今日排课与学期大表"
+  - name: 新公告
+    description: "基于本地数据库已读时间戳增量推送最新未读公告 (不重复刷屏)"
+  - name: 全部已读
+    description: "一键将所有未读公告标记为已读"
+  - name: 今日教务
+    description: "全量获取教务处今日最新通知与新闻动态"

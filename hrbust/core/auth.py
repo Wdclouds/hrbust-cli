@@ -132,12 +132,16 @@ def get_water_token() -> Tuple[Optional[str], Optional[str]]:
     return get_password("water_raw_info"), get_password("water_token")
 
 def get_water_account() -> Optional[str]:
-    """获取一卡通物理卡号 (ACCOUNT/ano)"""
-    return get_password("water_account")
+    """获取一卡通物理卡号 (ACCOUNT/ano)，自动过滤陈旧的测试假号"""
+    val = get_password("water_account")
+    if not val or str(val).strip() in ("2101010101", "null", "None", ""):
+        return None
+    return str(val).strip()
 
 def set_water_account(account: str):
     """保存一卡通物理卡号 (ACCOUNT/ano)"""
-    set_password("water_account", str(account))
+    if account and str(account).strip() not in ("2101010101", "null", "None"):
+        set_password("water_account", str(account).strip())
 
 def set_water_token(arg1: str, arg2: Optional[str] = None, account: Optional[str] = None):
     """
