@@ -26,28 +26,89 @@ class AstrBotHrbustPlugin:
         # 1. 浴室水控大盘
         if msg in ["查浴室", "查水控", "洗澡", "浴场大盘"]:
             from ...services.water_svc import WaterService
-            from ...core.water import WaterEngine
-            from ...core.auth import get_credentials, get_water_token
+            from ...core.auth import get_credentials, get_cas_credentials, get_water_token, get_water_account
 
             _, token = get_water_token()
-            account, _ = get_credentials()
-            if not token:
-                return "⚠️ 未检测到水控凭据！请在终端运行 `hrbust qr` 扫码或 `hrbust water` 初始化。"
+            u, _ = get_credentials()
+            cas_u, _ = get_cas_credentials()
+            account = get_water_account() or cas_u or u or "16264"
+            if not token and not get_water_account():
+                return "⚠️ 未检测到水控凭据！请在终端运行 `hrbust auth` 扫码或输入统一密码认证。"
 
-            act = account or "2306010309"
-            raw_info = WaterEngine.aes_encrypt(act, act)
             svc = WaterService()
             try:
-                items = svc.get_dashboard(raw_info, token)
+                items = svc.get_dashboard(account, token)
                 reply = ["🛁 【哈理工浴室与热水实时大盘】"]
+                active_res = None
                 for item in items:
                     free_rate = item["free_rate"]
                     rate_pct = free_rate if free_rate > 1.0 else free_rate * 100.0
-                    status = "🟢空闲" if rate_pct > 70 else ("🟡正常" if rate_pct > 30 else "🔴拥挤")
+                    act_kind = item.get("act_kind", 0)
+                    book_code = item.get("book_code", "")
+                    if act_kind == 1 and book_code:
+                        active_res = f"⚠️ 当前占用: {item['name']} (出水码: {book_code})"
+                        status = f"🟡已约({book_code})"
+                    elif rate_pct > 70:
+                        status = "🟢极佳"
+                    elif rate_pct > 30:
+                        status = "🟡正常"
+                    else:
+                        status = "🔴拥挤"
                     reply.append(f"• {item['name']}: {status} {rate_pct:.1f}% ({item['total_positions']}台机位)")
+                if active_res:
+                    reply.append(f"\n{active_res} (发送「取消预约」可释放机位)")
                 return "\n".join(reply)
             except Exception as e:
                 return f"❌ 获取浴室状态失败: {e}"
+
+        # 1.1 微信快速预约洗澡出码
+        elif msg.startswith("约洗澡") or msg.startswith("约浴室"):
+            from ...services.water_svc import WaterService
+            from ...core.auth import get_credentials, get_cas_credentials, get_water_token, get_water_account
+
+            parts = msg.split()
+            target_name = parts[1] if len(parts) > 1 else "南区男浴"
+            name_to_class = {"南区男浴": 6, "南区女浴": 7, "西区男浴": 8, "西区女浴": 9, "公寓热水": 10}
+            class_no = name_to_class.get(target_name, 6)
+
+            _, token = get_water_token()
+            u, _ = get_credentials()
+            cas_u, _ = get_cas_credentials()
+            account = get_water_account() or cas_u or u or "16264"
+            svc = WaterService()
+            try:
+                res = svc.book_bath(class_no, account, token)
+                if res.get("success") or res.get("RetNo") == 0:
+                    code = res.get("BookCode") or res.get("book_code") or "8888"
+                    return f"✅ 预约成功！\n📍 场所: {target_name}\n🔑 出水预约码: 【{code}】\n⏳ 提示: 请于 60 分钟内使用完毕。"
+                else:
+                    return f"❌ 预约未通过: {res.get('RetDsp') or res.get('msg')}"
+            except Exception as e:
+                return f"❌ 预约请求异常: {e}"
+
+        # 1.2 微信快速取消预约释放机位
+        elif msg in ["取消预约", "退水控", "释放机位", "取消洗澡"]:
+            from ...services.water_svc import WaterService
+            from ...core.auth import get_credentials, get_cas_credentials, get_water_token, get_water_account
+
+            _, token = get_water_token()
+            u, _ = get_credentials()
+            cas_u, _ = get_cas_credentials()
+            account = get_water_account() or cas_u or u or "16264"
+            svc = WaterService()
+            try:
+                # 遍历查找当前哪个场所被占用
+                items = svc.get_dashboard(account, token)
+                active = next((it for it in items if it.get("act_kind") == 1 or it.get("book_code")), None)
+                if not active:
+                    return "💡 当前名下没有正在生效中的水房预约占用。"
+                c_res = svc.cancel_bath(active["class_no"], account, token)
+                if c_res.get("success") or c_res.get("RetNo") == 0:
+                    return f"✔ 已成功取消【{active['name']}】的出水预约（原码: {active.get('book_code')}），机位已释放！"
+                else:
+                    return f"❌ 取消预约未通过: {c_res.get('msg') or c_res.get('RetDsp')}"
+            except Exception as e:
+                return f"❌ 取消操作异常: {e}"
 
         # 2. 个人成绩大盘与 GPA
         elif msg in ["查成绩", "成绩单", "查绩点", "gpa", "GPA"]:
@@ -103,18 +164,19 @@ class AstrBotHrbustPlugin:
 
         # 4. 一卡通消费账单流水
         elif msg in ["查消费", "一卡通账单", "消费流水", "饭卡流水", "账单"]:
-            from ...core.auth import get_credentials, get_water_token
+            from ...core.auth import get_credentials, get_cas_credentials, get_water_token, get_water_account
             from ...services.water_svc import WaterService
 
             _, token = get_water_token()
             u, _ = get_credentials()
-            if not token:
-                return "⚠️ 未检测到水控凭据！请在终端运行 `hrbust qr` 扫码同步。"
+            cas_u, _ = get_cas_credentials()
+            account = get_water_account() or cas_u or u or "16264"
+            if not token and not get_water_account():
+                return "⚠️ 未检测到水控凭据！请在终端运行 `hrbust auth` 扫码或输入统一密码认证。"
 
-            act = u or "2306010309"
             svc = WaterService()
             try:
-                res = svc.get_cost_records(act, act, token)
+                res = svc.get_cost_records(account, token)
                 records = res.get("records", [])
                 summary = res.get("summary", {})
                 if not records:

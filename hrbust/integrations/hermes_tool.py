@@ -5,7 +5,7 @@ HRBUST Toolkit -> Hermes Agent 原生工具适配器
 
 from typing import Dict, Any, List, Optional
 from ..core.network import check_campus_network
-from ..core.auth import get_credentials, get_cas_credentials, get_water_token
+from ..core.auth import get_credentials, get_cas_credentials, get_water_token, get_water_account
 from ..core.jwzx import JwzxEngine
 from ..services.water_svc import WaterService
 from ..services.news_svc import NewsService
@@ -25,22 +25,48 @@ def _get_authenticated_jwzx() -> Optional[JwzxEngine]:
     return None
 
 def hermes_get_bath_status() -> Dict[str, Any]:
-    """[Hermes Tool] 查询哈理工各浴室与热水的实时空闲率大盘"""
+    """[Hermes Tool] 查询哈理工各浴室与热水的实时空闲率大盘 (支持 5 分钟 Token 自动自愈)"""
     if not check_campus_network():
         return {"error": "未连接哈理工校园网"}
     _, token = get_water_token()
     u, _ = get_credentials()
     cas_u, _ = get_cas_credentials()
-    account = cas_u or u or "2306010309"
-    if not token:
+    account = get_water_account() or cas_u or u or "16264"
+    if not token and not get_water_account():
         return {"error": "未在网上办事大厅认证，请先运行 hrbust auth 扫码或登录"}
 
-    from ..core.water import WaterEngine
-    raw_info = WaterEngine.aes_encrypt(account, account)
     svc = WaterService()
     try:
-        items = svc.get_dashboard(raw_info, token)
+        items = svc.get_dashboard(account, token)
         return {"success": True, "items": items}
+    except Exception as e:
+        return {"error": str(e)}
+
+def hermes_book_bath(class_no: int = 6) -> Dict[str, Any]:
+    """[Hermes Tool] 申请浴室出水预约码 (class_no: 6=南区男浴, 7=南区女浴, 8=西区男浴, 9=西区女浴, 10=公寓热水)"""
+    if not check_campus_network():
+        return {"error": "未连接哈理工校园网"}
+    _, token = get_water_token()
+    u, _ = get_credentials()
+    cas_u, _ = get_cas_credentials()
+    account = get_water_account() or cas_u or u or "16264"
+    svc = WaterService()
+    try:
+        return svc.book_bath(class_no, account, token)
+    except Exception as e:
+        return {"error": str(e)}
+
+def hermes_cancel_bath(class_no: int = 6) -> Dict[str, Any]:
+    """[Hermes Tool] 取消当前正在生效中的水房预约占用，释放机位"""
+    if not check_campus_network():
+        return {"error": "未连接哈理工校园网"}
+    _, token = get_water_token()
+    u, _ = get_credentials()
+    cas_u, _ = get_cas_credentials()
+    account = get_water_account() or cas_u or u or "16264"
+    svc = WaterService()
+    try:
+        return svc.cancel_bath(class_no, account, token)
     except Exception as e:
         return {"error": str(e)}
 
@@ -71,12 +97,12 @@ def hermes_get_card_records(start: str = "", end: str = "") -> Dict[str, Any]:
     _, token = get_water_token()
     u, _ = get_credentials()
     cas_u, _ = get_cas_credentials()
-    account = cas_u or u or "2306010309"
-    if not token:
+    account = get_water_account() or cas_u or u or "16264"
+    if not token and not get_water_account():
         return {"error": "未在网上办事大厅认证，请先运行 hrbust auth 扫码或登录"}
     svc = WaterService()
     try:
-        return svc.get_cost_records(account, account, token, start_date=start, end_date=end)
+        return svc.get_cost_records(account, token, start_date=start, end_date=end)
     except Exception as e:
         return {"error": str(e)}
 
