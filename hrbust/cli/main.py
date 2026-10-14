@@ -623,6 +623,29 @@ def qr_alias():
     svc = WaterService()
     _run_qr_flow(svc)
 
+@app.command(name="login")
+def login(
+    user: str = typer.Option(None, "--user", "-u", help="学号"),
+    password: str = typer.Option(None, "--pass", "-p", help="教务网密码")
+):
+    """教务在线 (JWZX) 官方登录绑定 (用于课表、成绩单、考试考场、空教室、培养方案)"""
+    _ensure_network()
+    from ..core.auth import set_credentials
+    from ..core.jwzx import JwzxEngine
+
+    u = user or Prompt.ask("请输入教务在线学号")
+    p = password or Prompt.ask("请输入教务在线密码", password=True)
+
+    engine = JwzxEngine()
+    with console.status("[cyan]正在进行打码验证并登录教务在线...[/cyan]"):
+        success = engine.login(u, p)
+    if success:
+        set_credentials(u, p)
+        console.print(f"[bold green]✔ 教务在线登录成功！学号 {u} 凭据已安全落盘。[/bold green]")
+    else:
+        console.print("[bold red]❌ 教务在线登录失败：学号或密码错误，或自动打码重试耗尽。[/bold red]")
+        raise typer.Exit(code=1)
+
 @app.command(name="tui")
 def tui():
     """启动 HRBUST 全屏交互式终端中枢大盘 (TUI)"""
