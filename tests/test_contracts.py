@@ -345,3 +345,37 @@ def test_exam_service_parsing_and_countdown():
     assert e2["seat_no"] == "42"
     assert e2["status"] == "已结束"
 
+def test_water_engine_get_acc_cost_info_mock():
+    from unittest.mock import MagicMock
+    from hrbust.core.water import WaterEngine
+    from hrbust.services.water_svc import WaterService
+
+    engine = WaterEngine()
+    svc = WaterService(engine)
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "RetNo": 0,
+        "RetDsp": "成功",
+        "list": [
+            {"ClassName": "南区男浴", "DealTime": "2026-10-12 18:25:30", "DealMoney": "1.50"},
+            {"ClassName": "公寓热水", "DealTime": "2026-10-11 21:10:00", "DealMoney": "0.30"},
+            {"ClassName": "西区学生食堂", "DealTime": "2026-10-11 12:05:12", "DealMoney": "12.80"}
+        ]
+    }
+    engine.session.get = MagicMock(return_value=mock_resp)
+
+    res = svc.get_cost_records("2306010309", "2306010309", "tok_test_123")
+    records = res["records"]
+    summary = res["summary"]
+
+    assert len(records) == 3
+    assert records[0]["place"] == "南区男浴"
+    assert records[0]["amount"] == 1.50
+    assert records[2]["place"] == "西区学生食堂"
+    assert records[2]["amount"] == 12.80
+
+    assert summary["total_count"] == 3
+    # 1.50 + 0.30 + 12.80 = 14.60
+    assert summary["total_cost"] == 14.60
+

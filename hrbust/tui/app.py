@@ -98,6 +98,7 @@ class HrbustTuiApp(App):
                             yield Label("• 📅 学业今日课表: 输入 [bold yellow]today[/bold yellow] 或 [bold yellow]schedule[/bold yellow] 查看排课矩阵", classes="guide-item")
                             yield Label("• 📊 个人成绩大盘: 输入 [bold yellow]score[/bold yellow] 查看各科学分与加权平均 GPA", classes="guide-item")
                             yield Label("• 📝 考场与座位号: 输入 [bold yellow]exam[/bold yellow] 查看期末考试时间、考场教室与座位号", classes="guide-item")
+                            yield Label("• 💳 一卡通消费流水: 输入 [bold yellow]card[/bold yellow] 查看洗浴开水扣费账单与总计", classes="guide-item")
                             yield Label("• 📢 教务公告新闻: 输入 [bold yellow]news[/bold yellow] 或 [bold yellow]notice[/bold yellow] 查看官方通告", classes="guide-item")
                             yield Label("• 📰 通告正文阅读: 输入 [bold yellow]read <文章ID>[/bold yellow] 或在列表中按 Enter", classes="guide-item")
                             yield Label("• 📱 办事大厅扫码登录: 输入 [bold yellow]qr[/bold yellow] 微信/手机扫码秒登打通水控", classes="guide-item")
@@ -202,6 +203,16 @@ class HrbustTuiApp(App):
                             yield Label("📝 正在检索考场与座位号日程...", id="exam-summary-deck-label")
                         yield DataTable(id="table-exam-deck")
 
+                    # 11. 一卡通消费流水账单大盘视图
+                    with Vertical(id="card-view", classes="view-panel"):
+                        with Horizontal(classes="view-header-bar"):
+                            yield Label("💳 [bold cyan]一卡通洗浴与热水消费流水大盘[/bold cyan]", classes="view-header-title")
+                            yield Button("🔄 重新拉取", id="btn-card-refresh-deck")
+                            yield Button("🏠 返回主页 (Esc)", id="btn-back-home-10")
+                        with Vertical(classes="voucher-card"):
+                            yield Label("💳 正在检索一卡通近期消费流水账单...", id="card-summary-deck-label")
+                        yield DataTable(id="table-card-deck")
+
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
                     yield Static("❯", id="command-prompt-symbol")
@@ -254,6 +265,10 @@ class HrbustTuiApp(App):
         t_exam.cursor_type = "row"
         t_exam.add_columns("序号", "学年学期", "考试课程", "性质", "考试时间", "考场地点", "座位号", "备考状态")
 
+        t_card = self.query_one("#table-card-deck", DataTable)
+        t_card.cursor_type = "row"
+        t_card.add_columns("序号", "交易时间", "消费场所 / 扣费项目", "扣款金额")
+
     def _update_status_bar(self) -> None:
         """刷新顶部状态指示条"""
         try:
@@ -284,7 +299,7 @@ class HrbustTuiApp(App):
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
-        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr", "exam"]
+        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr", "exam", "card"]
         for v in views:
             widget = self.query_one(f"#{v}-view", Vertical)
             widget.display = (v == target)
@@ -399,6 +414,9 @@ class HrbustTuiApp(App):
             _, w_tok = get_water_token()
             if not w_tok and u and p:
                 self.action_sync_water_in_background(u, p)
+        elif cmd in ("card", "cards", "bill", "bills", "cost", "costs", "ecard"):
+            self.switch_to_view("card")
+            self.action_fetch_card_data()
         elif cmd in ("exam", "exams", "test", "tests"):
             self.switch_to_view("exam")
             self.action_fetch_exam_data()
@@ -793,6 +811,66 @@ class HrbustTuiApp(App):
         else:
             att_lbl.update("[dim]（本文无附加下载文件）[/dim]")
 
+    # ==================== 任务 E: 一卡通消费流水账单 Workers ====================
+
+    @work(thread=True)
+    def action_fetch_card_data(self) -> None:
+        """后台拉取一卡通近期洗浴与热水消费流水"""
+        w_info, w_tok = get_water_token()
+        u, _ = get_credentials()
+        if not w_tok:
+            self.notify("未检测到水控凭据！请在底部输入 qr 扫码登录或 login 绑定学号", title="需要登录", severity="warning")
+            def _show_no_card():
+                table = self.query_one("#table-card-deck", DataTable)
+                table.clear()
+                table.add_row("-", "-", "未检测到水控凭据，请在底部输入 qr 扫码登录", "-")
+                self.query_one("#card-summary-deck-label", Label).update("⚠️ 请先扫码登录办事大厅同步水控凭据")
+            self.call_from_thread(_show_no_card)
+            return
+
+        account = u or "2306010309"
+        self.notify("正在拉取一卡通消费流水账单...", title="消费账单")
+        try:
+            res = self.water_svc.get_cost_records(account, account, w_tok)
+            self.call_from_thread(self._populate_card_table, res)
+            records = res.get("records", [])
+            summary = res.get("summary", {})
+            self.notify(f"已同步 {len(records)} 笔消费流水！总支出: ¥ {summary.get('total_cost')}", title="消费账单", severity="information")
+        except Exception as e:
+            self.notify(f"拉取消费账单失败: {e}", severity="error")
+            def _show_card_err():
+                table = self.query_one("#table-card-deck", DataTable)
+                table.clear()
+                table.add_row("!", "-", f"拉取消费流水失败: {e}", "-")
+            self.call_from_thread(_show_card_err)
+
+    def _populate_card_table(self, res: Dict[str, Any]) -> None:
+        table = self.query_one("#table-card-deck", DataTable)
+        summary_lbl = self.query_one("#card-summary-deck-label", Label)
+        table.clear()
+
+        records = res.get("records", [])
+        summary = res.get("summary", {})
+        if not records:
+            summary_lbl.update("💡 [dim]近期暂无一卡通消费扣费流水明细[/dim]")
+            table.add_row("-", "-", "暂无近期消费记录", "-")
+            return
+
+        summary_lbl.update(
+            f"💰 [bold cyan]消费汇总[/bold cyan]  |  "
+            f"近期消费: [bold green]{summary.get('total_count', len(records))} 笔[/bold green]  |  "
+            f"累计支出: [bold yellow on black]  ¥ {summary.get('total_cost', 0.0)}  [/bold yellow on black]"
+        )
+
+        for idx, r in enumerate(records, 1):
+            amt = r.get("amount", 0.0)
+            table.add_row(
+                str(idx),
+                r.get("time", ""),
+                r.get("place", "校园消费"),
+                f"[bold yellow]-¥ {amt:.2f}[/bold yellow]"
+            )
+
     # ==================== 任务 D: 考试日程与座位号大盘 Workers ====================
 
     @work(thread=True)
@@ -960,6 +1038,7 @@ class HrbustTuiApp(App):
             "btn-back-home-7",
             "btn-back-home-8",
             "btn-back-home-9",
+            "btn-back-home-10",
         ):
             self.action_show_home()
         elif btn_id == "btn-water-refresh-deck":
@@ -978,6 +1057,8 @@ class HrbustTuiApp(App):
             self.action_start_qr_login_flow()
         elif btn_id == "btn-exam-refresh-deck":
             self.action_fetch_exam_data()
+        elif btn_id == "btn-card-refresh-deck":
+            self.action_fetch_card_data()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "table-water-deck":

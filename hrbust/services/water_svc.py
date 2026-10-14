@@ -26,6 +26,46 @@ class WaterService:
         raw_info = self.engine.aes_encrypt(json.dumps(payload), userid)
         return self.engine.request_book_code(raw_info, token)
 
+    def get_cost_records(
+        self, account: str, userid: str, token: str, start_date: str = "", end_date: str = ""
+    ) -> Dict[str, Any]:
+        """
+        查询一卡通/水控消费流水账单并计算收支统计汇总
+        """
+        import json
+        payload = {
+            "startdate": start_date or "",
+            "enddate": end_date or "",
+            "ano": account
+        }
+        raw_info = self.engine.aes_encrypt(json.dumps(payload), userid)
+        raw_list = self.engine.get_acc_cost_info(raw_info, token)
+
+        records = []
+        total_cost = 0.0
+        for item in raw_list:
+            money_val = 0.0
+            try:
+                money_val = float(str(item.get("DealMoney", 0.0)).replace("-", "").strip())
+            except Exception:
+                pass
+            total_cost += money_val
+
+            records.append({
+                "place": item.get("ClassName", "校园一卡通扣费").strip(),
+                "time": item.get("DealTime", ""),
+                "amount": money_val,
+                "raw_money": str(item.get("DealMoney", ""))
+            })
+
+        return {
+            "records": records,
+            "summary": {
+                "total_count": len(records),
+                "total_cost": round(total_cost, 2),
+            }
+        }
+
     def auto_auth_and_sync(self, username: str, password: str) -> Dict[str, Any]:
         """
         通过 CAS 统一身份认证全自动换取水控 Token 并自动加密落盘

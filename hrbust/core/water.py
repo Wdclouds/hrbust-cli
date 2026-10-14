@@ -125,6 +125,19 @@ class WaterEngine:
             "msg": data.get("RetDsp", "取消操作完成")
         }
 
+    def get_acc_cost_info(self, raw_info: str, token: str) -> List[Dict[str, Any]]:
+        """
+        查询一卡通/水控近期消费流水与扣费账单
+        :param raw_info: 加密后的查询参数 (包含 ano, startdate, enddate)
+        """
+        url = f"{self.BASE_URL}/GetAccCostInfo"
+        params = {"info": raw_info, "token": token}
+        res = self.session.get(url, params=params, timeout=8)
+        data = res.json()
+        if data.get("RetNo") != 0:
+            raise RuntimeError(f"获取一卡通消费账单失败: {data.get('RetDsp', '未知错误')}")
+        return data.get("list", [])
+
     # ==================== 方案 1: CAS 统一认证全自动换票 ====================
     CAS_URL = "https://auth.hrbust.edu.cn/authserver/login"
     SERVICE_URL = "https://yktks.hrbust.edu.cn/"

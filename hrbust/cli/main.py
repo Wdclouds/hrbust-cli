@@ -404,6 +404,68 @@ def exam(
     console.print(table)
     console.print(f"[bold cyan]💡 提示[/bold cyan]: 请提前 15 分钟携带学生证/身份证抵达考场，严禁携带智能手表与通信设备。")
 
+# ==================== 8.8 一卡通消费流水账单 (card) ====================
+@app.command(name="card")
+def card(
+    start: str = typer.Option("", "--start", "-s", help="起始日期 (格式: YYYY-MM-DD)"),
+    end: str = typer.Option("", "--end", "-e", help="结束日期 (格式: YYYY-MM-DD)"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出消费账单")
+):
+    """查询一卡通/水控近期洗浴与热水消费流水账单与扣费明细"""
+    _ensure_network()
+    from ..services.water_svc import WaterService
+    from ..core.auth import get_credentials, get_water_token
+
+    w_info, w_tok = get_water_token()
+    u, _ = get_credentials()
+
+    if not w_tok:
+        console.print("[bold yellow]未检测到水控凭据！请先运行 hrbust qr 扫码登录或 hrbust login 绑定学号密码。[/bold yellow]")
+        raise typer.Exit(code=1)
+
+    account = u or "2306010309"
+    svc = WaterService()
+    with console.status("[cyan]正在拉取一卡通消费流水账单...[/cyan]"):
+        try:
+            res = svc.get_cost_records(account, account, w_tok, start_date=start, end_date=end)
+        except Exception as e:
+            console.print(f"[bold red][错误] 获取一卡通账单失败: {e}[/bold red]")
+            raise typer.Exit(code=1)
+
+    if json_mode:
+        import json
+        console.print(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+
+    records = res.get("records", [])
+    summary = res.get("summary", {})
+
+    if not records:
+        console.print("[yellow]近期暂无一卡通消费扣费记录。[/yellow]")
+        return
+
+    table = Table(title=f"哈理工一卡通消费流水账单 (共 {summary.get('total_count', len(records))} 笔)", border_style="cyan")
+    table.add_column("序号", justify="center", style="dim")
+    table.add_column("交易时间", style="bold white")
+    table.add_column("消费场所 / 扣费项目", style="cyan")
+    table.add_column("扣款金额 (元)", justify="right", style="bold yellow")
+
+    for idx, r in enumerate(records, 1):
+        amt = r.get("amount", 0.0)
+        table.add_row(
+            str(idx),
+            r.get("time", ""),
+            r.get("place", ""),
+            f"-{amt:.2f}"
+        )
+
+    console.print(table)
+    console.print(
+        f"[bold cyan]💰 消费汇总[/bold cyan]: "
+        f"查询笔数: [bold green]{summary.get('total_count')} 笔[/bold green]  |  "
+        f"累计消费支出: [bold yellow on black] ¥ {summary.get('total_cost')} [/bold yellow on black]"
+    )
+
 # ==================== 9. 办事大厅与水控扫码登录 (qr) ====================
 @app.command(name="qr")
 def qr_login():
