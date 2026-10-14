@@ -379,14 +379,15 @@ class HrbustTuiApp(App):
         table.clear()
         for idx, item in enumerate(items, 1):
             free_rate = item.get("free_rate", 0.0)
-            if free_rate > 70:
-                rate_text = f"[green]{free_rate:.1f}%[/green]"
+            rate_pct = free_rate if free_rate > 1.0 else free_rate * 100.0
+            if rate_pct > 70:
+                rate_text = f"[green]{rate_pct:.1f}%[/green]"
                 status_text = "[bold green]极佳 · 无需排队[/bold green]"
-            elif free_rate > 30:
-                rate_text = f"[yellow]{free_rate:.1f}%[/yellow]"
+            elif rate_pct > 30:
+                rate_text = f"[yellow]{rate_pct:.1f}%[/yellow]"
                 status_text = "[bold yellow]正常 · 少量空位[/bold yellow]"
             else:
-                rate_text = f"[red]{free_rate:.1f}%[/red]"
+                rate_text = f"[red]{rate_pct:.1f}%[/red]"
                 status_text = "[bold red]拥挤 · 机位紧张[/bold red]"
 
             table.add_row(
@@ -416,8 +417,8 @@ class HrbustTuiApp(App):
         self.notify(f"正在申请 {target['name']} 出水预约码...", title="水控预约")
         try:
             res = self.water_svc.book_bath(target["class_no"], account, account, token)
-            ret_no = res.get("RetNo", res.get("ret_no", -1))
-            if ret_no == 0:
+            is_success = res.get("success") or res.get("RetNo") == 0 or res.get("ret_no") == 0
+            if is_success:
                 code = res.get("BookCode") or res.get("book_code") or "8888"
                 self.call_from_thread(self._render_deck_voucher, target["name"], code)
                 self.notify(f"预约成功！出水码: {code}", title="出码成功", severity="information")

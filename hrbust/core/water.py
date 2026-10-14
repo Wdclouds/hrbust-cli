@@ -87,13 +87,29 @@ class WaterEngine:
         res = self.session.get(url, params=params, timeout=6)
         data = res.json()
 
-        if data.get("RetNo") != 0:
-            return {"success": False, "msg": data.get("RetDsp", "预约申请未通过")}
+        ret_no = data.get("RetNo", -1)
+        ret_dsp = data.get("RetDsp", "未知状态")
+        book_code = data.get("BookCode", "")
+
+        if ret_no != 0:
+            return {
+                "success": False,
+                "ret_no": ret_no,
+                "RetNo": ret_no,
+                "msg": ret_dsp or "预约申请未通过",
+                "RetDsp": ret_dsp or "预约申请未通过",
+                "book_code": book_code,
+                "BookCode": book_code,
+            }
 
         return {
             "success": True,
-            "book_code": data.get("BookCode"),
-            "msg": data.get("RetDsp", "预约成功")
+            "ret_no": 0,
+            "RetNo": 0,
+            "book_code": book_code,
+            "BookCode": book_code,
+            "msg": ret_dsp or "预约成功",
+            "RetDsp": ret_dsp or "预约成功",
         }
 
     def cancel_book_code(self, raw_info: str, token: str) -> Dict[str, Any]:

@@ -120,9 +120,17 @@ def set_credentials(u: str, p: str):
 def get_water_token() -> Tuple[Optional[str], Optional[str]]:
     return get_password("water_raw_info"), get_password("water_token")
 
-def set_water_token(raw_info: str, token: str):
-    set_password("water_raw_info", raw_info)
-    set_password("water_token", token)
+def set_water_token(arg1: str, arg2: Optional[str] = None):
+    """
+    保存水控凭据。
+    支持双参数 (raw_info, token) 或单参数 (token)。
+    """
+    if arg2 is not None:
+        raw_info, token = arg1, arg2
+        set_password("water_raw_info", raw_info)
+        set_password("water_token", token)
+    else:
+        set_password("water_token", arg1)
 
 def clear_all_credentials():
     delete_password("username")

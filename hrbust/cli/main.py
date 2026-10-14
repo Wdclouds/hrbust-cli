@@ -57,7 +57,7 @@ def _ensure_auth() -> JwzxEngine:
 def water():
     """浴室与水控：实时机位空闲大盘与交互式数字秒约"""
     _ensure_network()
-    token = get_water_token()
+    _, token = get_water_token()
     if not token:
         token = Prompt.ask("[bold yellow]请输入控水系统 Token[/bold yellow]")
         set_water_token(token)
@@ -71,8 +71,8 @@ def water():
 
     with console.status("[cyan]正在获取浴场实时空闲大盘...[/cyan]"):
         try:
-            info_b64 = water_eng.generate_token_info(username)
-            status_list = svc.get_status(info_b64, token)
+            info_b64 = water_eng.aes_encrypt(username, username)
+            status_list = svc.get_dashboard(info_b64, token)
         except Exception as e:
             console.print(f"[bold red][错误] 获取浴场状态异常: {e}[/bold red]")
             raise typer.Exit(code=1)
@@ -88,12 +88,14 @@ def water():
     for idx, item in enumerate(status_list, 1):
         mapping[str(idx)] = item
         free_rate = item["free_rate"]
-        advice = "[green]极佳无需排队[/green]" if free_rate > 70 else ("[yellow]正常[/yellow]" if free_rate > 30 else "[red]拥挤爆满[/red]")
+        # 兼容百分比数值 (85.48) 与小数 (0.8548)
+        rate_pct = free_rate if free_rate > 1.0 else free_rate * 100.0
+        advice = "[green]极佳无需排队[/green]" if rate_pct > 70 else ("[yellow]正常[/yellow]" if rate_pct > 30 else "[red]拥挤爆满[/red]")
         table.add_row(
             str(idx),
             item["name"],
             f"{item['total_positions']} 台",
-            f"{free_rate:.2f}%",
+            f"{rate_pct:.1f}%",
             advice
         )
 
@@ -106,19 +108,22 @@ def water():
 
     target = mapping[choice]
     with console.status(f"[cyan]正在为学号 {username} 申请 {target['name']} 预约码...[/cyan]"):
-        res = svc.book_water(username, target["class_no"], token)
+        res = svc.book_bath(target["class_no"], username, username, token)
 
-    if res.get("ret_no") == 0:
+    is_success = res.get("success") or res.get("RetNo") == 0 or res.get("ret_no") == 0
+    book_code = res.get("book_code") or res.get("BookCode")
+    if is_success:
         console.print(Panel(
             f"[bold green]预约成功[/bold green]\n\n"
             f"场所: [bold]{target['name']}[/bold]\n"
-            f"出水预约码: [bold yellow on black] {res.get('book_code')} [/bold yellow on black]\n"
+            f"出水预约码: [bold yellow on black] {book_code} [/bold yellow on black]\n"
             f"提示: 请于 60 分钟内在浴室终端输入使用",
             title="洗浴出码凭证",
             border_style="green"
         ))
     else:
-        console.print(f"[bold red][错误] 预约失败: {res.get('msg')}[/bold red]")
+        err_msg = res.get("msg") or res.get("RetDsp") or "未知原因"
+        console.print(f"[bold red][错误] 预约失败: {err_msg}[/bold red]")
 
 # ==================== 2. 自习与教室 (room) ====================
 @app.command(name="room")
