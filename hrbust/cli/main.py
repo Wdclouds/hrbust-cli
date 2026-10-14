@@ -350,6 +350,60 @@ def score(
         f"加权 GPA: [bold yellow on black] {summary.get('gpa')} [/bold yellow on black]"
     )
 
+# ==================== 8.5 期末考试日程大盘 (exam) ====================
+@app.command(name="exam")
+def exam(
+    term: str = typer.Option(None, "--term", "-t", help="按学年学期筛选，如 '2024-2025-1'"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出考试数据")
+):
+    """考前神器：查询期末/期中考试科目、考试时间、考场教学楼与座位号 (moduleId=2030)"""
+    engine = _ensure_auth()
+    from ..services.exam_svc import ExamService
+    svc = ExamService(engine)
+    with console.status("[cyan]正在拉取学生期末考试与考场安排日程...[/cyan]"):
+        res = svc.get_exams(term=term)
+
+    if json_mode:
+        import json
+        console.print(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+
+    exams = res.get("exams", [])
+    if not exams:
+        console.print(f"[yellow]{res.get('msg', '当前暂无考试安排')}[/yellow]")
+        return
+
+    table = Table(title=f"哈理工期末考试日程大盘 (共 {len(exams)} 门)", border_style="cyan")
+    table.add_column("学期", justify="center", style="dim")
+    table.add_column("考试课程", style="bold white")
+    table.add_column("性质", justify="center")
+    table.add_column("考试时间", style="bold yellow")
+    table.add_column("考场地点", style="cyan")
+    table.add_column("座位号", justify="center", style="bold green")
+    table.add_column("备考状态", justify="center")
+
+    for e in exams:
+        status_styled = e.get("countdown_desc", "")
+        if "今日" in status_styled or "明天" in status_styled:
+            status_styled = f"[bold red on white]{status_styled}[/bold red on white]"
+        elif "还有" in status_styled and (e.get("days_left") or 99) <= 7:
+            status_styled = f"[bold yellow]{status_styled}[/bold yellow]"
+        elif "已考完" in status_styled:
+            status_styled = f"[dim]{status_styled}[/dim]"
+
+        table.add_row(
+            e.get("term", ""),
+            e.get("course_name", ""),
+            e.get("exam_type", "正常考试"),
+            e.get("exam_time", "待排定"),
+            e.get("location", "考场未公布"),
+            str(e.get("seat_no", "-")),
+            status_styled
+        )
+
+    console.print(table)
+    console.print(f"[bold cyan]💡 提示[/bold cyan]: 请提前 15 分钟携带学生证/身份证抵达考场，严禁携带智能手表与通信设备。")
+
 # ==================== 9. 办事大厅与水控扫码登录 (qr) ====================
 @app.command(name="qr")
 def qr_login():

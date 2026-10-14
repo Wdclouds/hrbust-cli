@@ -37,6 +37,7 @@ from ..services.room_svc import RoomService
 from ..services.schedule_svc import ScheduleService
 from ..services.news_svc import NewsService
 from ..services.score_svc import ScoreService
+from ..services.exam_svc import ExamService
 
 ASCII_LOGO = r"""
 ██╗  ██╗██████╗ ██████╗ ██╗   ██╗███████╗████████╗
@@ -96,6 +97,7 @@ class HrbustTuiApp(App):
                             yield Label("• 🏫 空闲自习教室: 输入 [bold yellow]room 南一[/bold yellow] (加 -m 筛选多媒体机房)", classes="guide-item")
                             yield Label("• 📅 学业今日课表: 输入 [bold yellow]today[/bold yellow] 或 [bold yellow]schedule[/bold yellow] 查看排课矩阵", classes="guide-item")
                             yield Label("• 📊 个人成绩大盘: 输入 [bold yellow]score[/bold yellow] 查看各科学分与加权平均 GPA", classes="guide-item")
+                            yield Label("• 📝 考场与座位号: 输入 [bold yellow]exam[/bold yellow] 查看期末考试时间、考场教室与座位号", classes="guide-item")
                             yield Label("• 📢 教务公告新闻: 输入 [bold yellow]news[/bold yellow] 或 [bold yellow]notice[/bold yellow] 查看官方通告", classes="guide-item")
                             yield Label("• 📰 通告正文阅读: 输入 [bold yellow]read <文章ID>[/bold yellow] 或在列表中按 Enter", classes="guide-item")
                             yield Label("• 📱 办事大厅扫码登录: 输入 [bold yellow]qr[/bold yellow] 微信/手机扫码秒登打通水控", classes="guide-item")
@@ -190,6 +192,16 @@ class HrbustTuiApp(App):
                                 yield Label("", id="qr-code-display")
                                 yield Label("正在申请二维码...", id="qr-status-display")
 
+                    # 10. 期末/期中考试安排与考场座位号大盘视图
+                    with Vertical(id="exam-view", classes="view-panel"):
+                        with Horizontal(classes="view-header-bar"):
+                            yield Label("📝 [bold cyan]期末/期中考试日程与考场座位号大盘[/bold cyan]", classes="view-header-title")
+                            yield Button("🔄 重新拉取", id="btn-exam-refresh-deck")
+                            yield Button("🏠 返回主页 (Esc)", id="btn-back-home-9")
+                        with Vertical(classes="voucher-card"):
+                            yield Label("📝 正在检索考场与座位号日程...", id="exam-summary-deck-label")
+                        yield DataTable(id="table-exam-deck")
+
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
                     yield Static("❯", id="command-prompt-symbol")
@@ -238,6 +250,10 @@ class HrbustTuiApp(App):
         t_score.cursor_type = "row"
         t_score.add_columns("序号", "学年学期", "课程名称", "课程性质", "学分", "平时", "期末", "综合成绩", "绩点")
 
+        t_exam = self.query_one("#table-exam-deck", DataTable)
+        t_exam.cursor_type = "row"
+        t_exam.add_columns("序号", "学年学期", "考试课程", "性质", "考试时间", "考场地点", "座位号", "备考状态")
+
     def _update_status_bar(self) -> None:
         """刷新顶部状态指示条"""
         try:
@@ -268,7 +284,7 @@ class HrbustTuiApp(App):
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
-        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr"]
+        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr", "exam"]
         for v in views:
             widget = self.query_one(f"#{v}-view", Vertical)
             widget.display = (v == target)
@@ -383,6 +399,9 @@ class HrbustTuiApp(App):
             _, w_tok = get_water_token()
             if not w_tok and u and p:
                 self.action_sync_water_in_background(u, p)
+        elif cmd in ("exam", "exams", "test", "tests"):
+            self.switch_to_view("exam")
+            self.action_fetch_exam_data()
         elif cmd in ("score", "scores", "gpa", "grade", "grades"):
             self.switch_to_view("score")
             self.action_fetch_score_data()
@@ -774,6 +793,86 @@ class HrbustTuiApp(App):
         else:
             att_lbl.update("[dim]（本文无附加下载文件）[/dim]")
 
+    # ==================== 任务 D: 考试日程与座位号大盘 Workers ====================
+
+    @work(thread=True)
+    def action_fetch_exam_data(self) -> None:
+        """后台拉取期末/期中考试日程、地点与座位号"""
+        u, p = get_credentials()
+        if not u or not p:
+            self.notify("未绑定教务账号！请在底部输入: login <学号> <密码>", title="需要登录", severity="warning")
+            def _show_no_exam():
+                table = self.query_one("#table-exam-deck", DataTable)
+                table.clear()
+                table.add_row("-", "-", "未绑定教务账号，请在底部键入: login <学号> <密码>", "-", "-", "-", "-", "-")
+                self.query_one("#exam-summary-deck-label", Label).update("⚠️ 请先绑定教务账号后查看考试大盘")
+            self.call_from_thread(_show_no_exam)
+            return
+
+        self.notify("正在登录教务在线检索考场与座位安排...", title="考试大盘")
+        try:
+            if not self.jwzx_engine:
+                self.jwzx_engine = JwzxEngine()
+                if not self.jwzx_engine.login(u, p):
+                    self.notify("教务在线自动打码登录失败", severity="error")
+                    def _show_login_fail():
+                        table = self.query_one("#table-exam-deck", DataTable)
+                        table.clear()
+                        table.add_row("!", "-", "教务在线登录失败，请检查账号密码或验证码", "-", "-", "-", "-", "-")
+                    self.call_from_thread(_show_login_fail)
+                    return
+
+            svc = ExamService(self.jwzx_engine)
+            res = svc.get_exams()
+            self.call_from_thread(self._populate_exam_table, res)
+            exams = res.get("exams", [])
+            if not exams:
+                self.notify("当前暂无排考日程", severity="information")
+            else:
+                self.notify(f"已同步 {len(exams)} 门课程的考场与座位号！", title="考试大盘", severity="information")
+        except Exception as e:
+            self.notify(f"拉取考试安排失败: {e}", severity="error")
+            def _show_fetch_err():
+                table = self.query_one("#table-exam-deck", DataTable)
+                table.clear()
+                table.add_row("!", "-", f"拉取考试安排失败: {e}", "-", "-", "-", "-", "-")
+            self.call_from_thread(_show_fetch_err)
+
+    def _populate_exam_table(self, res: Dict[str, Any]) -> None:
+        table = self.query_one("#table-exam-deck", DataTable)
+        summary_lbl = self.query_one("#exam-summary-deck-label", Label)
+        table.clear()
+
+        exams = res.get("exams", [])
+        if not exams:
+            summary_lbl.update(f"⚠️ [bold yellow]{res.get('msg', '当前暂无考试安排')}[/bold yellow]")
+            table.add_row("-", "-", "教务处当前学期暂未发布正式考试安排", "-", "-", "-", "-", "-")
+            return
+
+        summary_lbl.update(f"📝 [bold cyan]期末考试总览[/bold cyan]  |  共排定 [bold green]{len(exams)} 门[/bold green] 考试科目  |  请提前确认考场教学楼与座位号")
+
+        for idx, e in enumerate(exams, 1):
+            status_desc = e.get("countdown_desc", "")
+            if "今日" in status_desc or "明天" in status_desc:
+                status_styled = f"[bold red on white] {status_desc} [/bold red on white]"
+            elif "还有" in status_desc and (e.get("days_left") or 99) <= 7:
+                status_styled = f"[bold yellow]{status_desc}[/bold yellow]"
+            elif "已考完" in status_desc:
+                status_styled = f"[dim]{status_desc}[/dim]"
+            else:
+                status_styled = f"[cyan]{status_desc}[/cyan]"
+
+            table.add_row(
+                str(idx),
+                e.get("term", ""),
+                e.get("course_name", ""),
+                e.get("exam_type", "正常考试"),
+                f"[bold yellow]{e.get('exam_time', '待排定')}[/bold yellow]",
+                f"[cyan]{e.get('location', '考场未公布')}[/cyan]",
+                f"[bold green]{e.get('seat_no', '-')}[/bold green]",
+                status_styled
+            )
+
     # ==================== 任务 C: 办事大厅扫码登录 Workers ====================
 
     @work(thread=True)
@@ -860,6 +959,7 @@ class HrbustTuiApp(App):
             "btn-back-home-6",
             "btn-back-home-7",
             "btn-back-home-8",
+            "btn-back-home-9",
         ):
             self.action_show_home()
         elif btn_id == "btn-water-refresh-deck":
@@ -876,6 +976,8 @@ class HrbustTuiApp(App):
             self.switch_to_view("news")
         elif btn_id == "btn-qr-refresh-deck":
             self.action_start_qr_login_flow()
+        elif btn_id == "btn-exam-refresh-deck":
+            self.action_fetch_exam_data()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "table-water-deck":

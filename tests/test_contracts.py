@@ -301,3 +301,47 @@ def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
     _, saved_tok = auth.get_water_token()
     assert saved_tok == "tok_qr_mock_999"
 
+def test_exam_service_parsing_and_countdown():
+    from unittest.mock import MagicMock
+    from bs4 import BeautifulSoup
+    from hrbust.services.exam_svc import ExamService
+
+    mock_engine = MagicMock()
+    svc = ExamService(mock_engine)
+
+    # 1. 模拟暂无排考提示
+    mock_no_exam_html = "<html><body>当前学期暂无考试安排数据</body></html>"
+    mock_engine.access_module.return_value = "http://fake_jwzx/exam"
+    mock_engine.get_page.return_value = BeautifulSoup(mock_no_exam_html, "html.parser")
+
+    res_empty = svc.get_exams()
+    assert res_empty["has_exams"] is False
+    assert len(res_empty["exams"]) == 0
+
+    # 2. 模拟正常考试安排表格
+    mock_exam_html = """
+    <html>
+      <table>
+        <tr><th>学期</th><th>课程代码</th><th>课程名称</th><th>考试性质</th><th>考试时间</th><th>考场</th><th>座位号</th></tr>
+        <tr><td>2024-2025-1</td><td>CS101</td><td>算法与数据结构</td><td>正常考试</td><td>2026-11-20 08:30-10:30</td><td>南区1号楼 203</td><td>18</td></tr>
+        <tr><td>2024-2025-1</td><td>CS102</td><td>计算机网络</td><td>正常考试</td><td>2024-01-15 13:30-15:30</td><td>西新主楼 502</td><td>42</td></tr>
+      </table>
+    </html>
+    """
+    mock_engine.get_page.return_value = BeautifulSoup(mock_exam_html, "html.parser")
+    res_normal = svc.get_exams()
+    assert res_normal["has_exams"] is True
+    assert len(res_normal["exams"]) == 2
+
+    # 验证排序与字段
+    e1 = res_normal["exams"][0]
+    assert e1["course_name"] == "算法与数据结构"
+    assert e1["location"] == "南区1号楼 203"
+    assert e1["seat_no"] == "18"
+    assert e1["days_left"] is not None
+
+    e2 = res_normal["exams"][1]
+    assert e2["course_name"] == "计算机网络"
+    assert e2["seat_no"] == "42"
+    assert e2["status"] == "已结束"
+
