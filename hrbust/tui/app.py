@@ -678,9 +678,19 @@ class HrbustTuiApp(App):
 
     @work(thread=True)
     def action_fetch_schedule_data(self) -> None:
-        """后台拉取课表数据"""
+        """后台拉取课表数据 (支持本地 SQLite 离线快照秒开)"""
         u, p = get_credentials()
+        from ..services.schedule_svc import ScheduleService
+
         if not u or not p:
+            # 检查是否有本地离线快照
+            svc_offline = ScheduleService(None)
+            cached_courses = svc_offline.get_timetable()
+            if cached_courses:
+                self.call_from_thread(self._populate_schedule_table, cached_courses)
+                self.notify(f"已从本地数据库载入离线课表快照 (共 {len(cached_courses)} 门课程)", title="离线课表", severity="information")
+                return
+
             self.notify("未绑定教务账号！请在底部输入: login <学号> <密码>", title="需要登录", severity="warning")
             def _show_no_sched():
                 table = self.query_one("#table-schedule-deck", DataTable)
@@ -689,16 +699,24 @@ class HrbustTuiApp(App):
             self.call_from_thread(_show_no_sched)
             return
 
-        self.notify("正在登录教务在线同步大课表...", title="学业课表")
+        self.notify("正在同步大课表...", title="学业课表")
         try:
             if not self.jwzx_engine:
                 self.jwzx_engine = JwzxEngine()
                 if not self.jwzx_engine.login(u, p):
-                    self.notify("教务在线自动登录失败", severity="error")
+                    # 登录失败，降级读取离线快照
+                    svc_offline = ScheduleService(None)
+                    cached_courses = svc_offline.get_timetable()
+                    if cached_courses:
+                        self.call_from_thread(self._populate_schedule_table, cached_courses)
+                        self.notify("教务在线连接受限，已自动为您载入本地离线课表快照！", title="离线课表", severity="warning")
+                        return
+
+                    self.notify("教务在线自动登录失败且无本地缓存", severity="error")
                     def _show_login_fail():
                         table = self.query_one("#table-schedule-deck", DataTable)
                         table.clear()
-                        table.add_row("!", "教务在线登录失败，请检查账号密码或验证码", "异常", "-", "-")
+                        table.add_row("!", "教务在线登录失败，请检查账号密码或内网连接", "异常", "-", "-")
                     self.call_from_thread(_show_login_fail)
                     return
 
@@ -707,6 +725,14 @@ class HrbustTuiApp(App):
             self.call_from_thread(self._populate_schedule_table, courses)
             self.notify(f"课表同步完成，共计 {len(courses)} 门课程", title="学业课表", severity="information")
         except Exception as e:
+            # 异常时同样尝试降级读取离线快照
+            svc_offline = ScheduleService(None)
+            cached_courses = svc_offline.get_timetable()
+            if cached_courses:
+                self.call_from_thread(self._populate_schedule_table, cached_courses)
+                self.notify(f"网络受限 ({e})，已平滑展示本地离线课表快照", title="离线课表", severity="warning")
+                return
+
             self.notify(f"课表拉取失败: {e}", severity="error")
             def _show_fetch_err():
                 table = self.query_one("#table-schedule-deck", DataTable)
