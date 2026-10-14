@@ -364,8 +364,10 @@ class HrbustTuiApp(App):
             return
 
         for item in items[:15]:
+            is_read = item.get("is_read", False)
+            unread_badge = "" if is_read else "[bold yellow]● [/bold yellow]"
             card = Vertical(
-                Label(f"[{item.get('type', '通告')}] · {item.get('date', '今日')}", classes="news-date"),
+                Label(f"{unread_badge}[{item.get('type', '通告')}] · {item.get('date', '今日')}", classes="news-date"),
                 Label(f"• {item.get('title', '')}", classes="news-title"),
                 classes="news-card",
             )

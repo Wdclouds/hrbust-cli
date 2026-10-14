@@ -502,3 +502,46 @@ async def test_astrbot_plugin_message_routing(monkeypatch):
     assert "哈理工今日教务与新闻" in reply_news
     assert "期中教学检查工作通告" in reply_news
 
+def test_campus_db_incremental_notices_and_schedule(tmp_path, monkeypatch):
+    import hrbust.core.auth as auth
+    import hrbust.core.db as db
+    monkeypatch.setattr(auth, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(db, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(db, "DB_FILE", tmp_path / "campus.db")
+
+    # 1. 测试增量通知写入
+    test_articles = [
+        {"id": "5534", "title": "教务在线更新测试通告", "date": "2026-10-14", "url": "http://mock/5534"},
+        {"id": "5532", "title": "期中考试考场编排通知", "date": "2026-10-12", "url": "http://mock/5532"}
+    ]
+    res_up = db.upsert_notices(test_articles, category="教务公告")
+    assert res_up["new_count"] == 2
+
+    # 查询所有未读通知
+    unreads = db.get_unread_notices()
+    assert len(unreads) == 2
+
+    # 标记其中一篇为已读
+    db.mark_notice_read(5534)
+    unreads_after = db.get_unread_notices()
+    assert len(unreads_after) == 1
+    assert unreads_after[0]["id"] == "5532"
+
+    # 测试全文详情缓存
+    db.update_notice_content(5534, "这是已缓存的通告正文内容", [{"name": "附件.docx", "url": "http://mock/att"}])
+    detail = db.get_cached_notice_detail(5534)
+    assert detail is not None
+    assert detail["content"] == "这是已缓存的通告正文内容"
+    assert len(detail["attachments"]) == 1
+
+    # 2. 测试课表快照存储与离线读取
+    test_courses = [
+        {"name": "数据结构", "teacher": "李老师", "room": "南一 203", "day_of_week": "周一", "session": "1-2节", "weeks": "1-16周"}
+    ]
+    db.save_schedule_snapshot(test_courses, term="current")
+    cached_sched = db.get_cached_schedule(term="current")
+    assert cached_sched["has_cache"] is True
+    assert len(cached_sched["courses"]) == 1
+    assert cached_sched["courses"][0]["name"] == "数据结构"
+    assert cached_sched["courses"][0]["teacher"] == "李老师"
+

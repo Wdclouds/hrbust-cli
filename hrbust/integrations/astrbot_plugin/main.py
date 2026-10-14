@@ -247,14 +247,37 @@ class AstrBotHrbustPlugin:
                 reply.append(f"• {r.get('name', '')} ({r.get('type', '普通')})")
             return "\n".join(reply)
 
-        # 7. 今日早报与校内新闻
+        # 7. 增量未读新公告推送 (基于已读时间戳追踪，不重复轰炸)
+        elif msg in ["新公告", "未读公告", "增量教务", "未读新闻", "查更新"]:
+            from ...services.news_svc import NewsService
+            svc = NewsService()
+            unreads = svc.get_unread_articles()
+            if not unreads:
+                return "🎉 太棒了！当前没有新发布的未读教务公告（已与本地 SQLite 数据库时间戳完全同步）。"
+
+            reply = [f"📢 【哈理工增量未读公告 (共 {len(unreads)} 篇)】"]
+            for u in unreads[:6]:
+                reply.append(f"• [{u.get('category', '通告')}] {u.get('date', '')} {u.get('title', '')} (ID: {u.get('id')})")
+            reply.append("\n💡 提示: 发送「全部已读」可将当前新公告一键标记为已读。")
+            return "\n".join(reply)
+
+        # 7.1 一键已读
+        elif msg in ["全部已读", "一键已读", "标为已读"]:
+            from ...services.news_svc import NewsService
+            svc = NewsService()
+            cnt = svc.mark_all_as_read()
+            return f"✔ 已成功将本地数据库中的 {cnt} 篇公告标记为已读！"
+
+        # 7.2 今日早报与校内新闻全量速递
         elif msg in ["今日教务", "教务早报", "学校新闻", "校园动态"]:
             from ...services.news_svc import NewsService
             svc = NewsService()
             items = svc.get_daily_brief()
             reply = ["📢 【哈理工今日教务与新闻】"]
             for item in items[:6]:
-                reply.append(f"[{item['type']}] {item['date']} {item['title']}")
+                is_read = item.get("is_read", False)
+                status_tag = "" if is_read else " [新]"
+                reply.append(f"[{item['type']}] {item['date']} {item['title']}{status_tag}")
             return "\n".join(reply)
 
         return None

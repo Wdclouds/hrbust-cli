@@ -221,13 +221,29 @@ def room(
 # ==================== 3. 今日课表 (today) ====================
 @app.command(name="today")
 def today():
-    """查看今日课程安排与教室节次"""
-    engine = _ensure_auth()
+    """查看今日课程安排与教室节次 (支持本地数据库离线快照)"""
+    from ..services.schedule_svc import ScheduleService
+    from ..core.auth import get_credentials
+    u, p = get_credentials()
+
+    engine = None
+    if u and p:
+        try:
+            engine = _ensure_auth()
+        except Exception:
+            pass
+
     svc = ScheduleService(engine)
-    with console.status("[cyan]正在拉取本学期大课表...[/cyan]"):
+    with console.status("[cyan]正在拉取大课表（支持本地缓存快照）...[/cyan]"):
         courses = svc.get_current_timetable()
 
-    table = Table(title="本学期课程清单", border_style="green")
+    if not courses:
+        console.print("[yellow]当前未检索到课表数据（请先登录教务系统同步一次）。[/yellow]")
+        return
+
+    is_cached = any(c.get("is_cached") for c in courses)
+    table_title = "本学期课程清单 [dim](本地离线快照)[/dim]" if is_cached else "本学期课程清单"
+    table = Table(title=table_title, border_style="green")
     table.add_column("课程名称", style="bold white")
     table.add_column("任课教师", justify="center")
     table.add_column("星期", justify="center")
@@ -245,41 +261,86 @@ def today():
             c.get("room", "")
         )
     console.print(table)
+    if is_cached:
+        console.print("[dim]💡 提示: 当前显示的是本地 SQLite 数据库中的离线课表快照，断网/校外随时可用。[/dim]")
 
 # ==================== 4. 教务公告 (notice) ====================
 @app.command(name="notice")
-def notice(page: int = typer.Option(1, "--page", "-p", help="页码")):
-    """免登录查看教务在线官方通知（选课、考试、四六级）"""
-    _ensure_network()
+def notice(
+    page: int = typer.Option(1, "--page", "-p", help="页码"),
+    unread: bool = typer.Option(False, "--unread", "-u", help="仅显示未读新增公告 (自上次已读时间戳之后)"),
+    read_all: bool = typer.Option(False, "--read-all", help="一键标记所有公告为已读")
+):
+    """免登录查看教务在线官方通知（支持本地数据库归档、未读时间戳追踪）"""
     svc = NewsService()
-    with console.status(f"[cyan]正在拉取第 {page} 页教务公告...[/cyan]"):
-        articles = svc.get_articles(svc.COL_NOTICE, page=page)
+    if read_all:
+        cnt = svc.mark_all_as_read(category="教务公告")
+        console.print(f"[bold green]✔ 已成功将 {cnt} 篇教务公告标记为已读！[/bold green]")
+        return
 
-    table = Table(title=f"哈理工教务处公告 (第 {page} 页)", border_style="yellow")
+    if unread:
+        with console.status("[cyan]正在查询未读新增教务公告...[/cyan]"):
+            articles = svc.get_unread_articles(category="教务公告")
+        title_str = f"哈理工未读教务公告 (共 {len(articles)} 篇)"
+    else:
+        with console.status(f"[cyan]正在拉取第 {page} 页教务公告...[/cyan]"):
+            articles = svc.get_articles(svc.COL_NOTICE, page=page)
+        title_str = f"哈理工教务处公告 (第 {page} 页)"
+
+    if not articles:
+        console.print("[green]🎉 太棒了！当前没有未读的教务公告。[/green]")
+        return
+
+    table = Table(title=title_str, border_style="yellow")
+    table.add_column("状态", justify="center")
     table.add_column("发布日期", justify="center", style="dim")
     table.add_column("公告标题", style="bold white")
     table.add_column("ID", justify="center", style="dim")
 
     for a in articles:
-        table.add_row(a.get("date", ""), a.get("title", ""), str(a.get("id", "")))
+        is_read = a.get("is_read", False)
+        status_badge = "[dim]已读[/dim]" if is_read else "[bold yellow]● 新[/bold yellow]"
+        table.add_row(status_badge, a.get("date", ""), a.get("title", ""), str(a.get("id", "")))
     console.print(table)
+    console.print("[dim]💡 提示: 敲 hrbust read <ID> 可在线看正文并自动标记已读；敲 hrbust notice --unread 仅看未读。[/dim]")
 
 # ==================== 5. 教学新闻 (news) ====================
 @app.command(name="news")
-def news(page: int = typer.Option(1, "--page", "-p", help="页码")):
-    """免登录查看哈理工最新教学新闻与教改竞赛动态"""
-    _ensure_network()
+def news(
+    page: int = typer.Option(1, "--page", "-p", help="页码"),
+    unread: bool = typer.Option(False, "--unread", "-u", help="仅显示未读新增新闻"),
+    read_all: bool = typer.Option(False, "--read-all", help="一键标记所有新闻为已读")
+):
+    """免登录查看哈理工最新教学新闻与教改动态（支持本地数据库归档与未读追踪）"""
     svc = NewsService()
-    with console.status(f"[cyan]正在拉取第 {page} 页教学新闻...[/cyan]"):
-        articles = svc.get_articles(svc.COL_NEWS, page=page)
+    if read_all:
+        cnt = svc.mark_all_as_read(category="教学新闻")
+        console.print(f"[bold green]✔ 已成功将 {cnt} 篇教学新闻标记为已读！[/bold green]")
+        return
 
-    table = Table(title=f"哈理工教学新闻 (第 {page} 页)", border_style="magenta")
+    if unread:
+        with console.status("[cyan]正在查询未读新增教学新闻...[/cyan]"):
+            articles = svc.get_unread_articles(category="教学新闻")
+        title_str = f"哈理工未读教学新闻 (共 {len(articles)} 篇)"
+    else:
+        with console.status(f"[cyan]正在拉取第 {page} 页教学新闻...[/cyan]"):
+            articles = svc.get_articles(svc.COL_NEWS, page=page)
+        title_str = f"哈理工教学新闻 (第 {page} 页)"
+
+    if not articles:
+        console.print("[green]🎉 当前没有未读的教学新闻。[/green]")
+        return
+
+    table = Table(title=title_str, border_style="magenta")
+    table.add_column("状态", justify="center")
     table.add_column("发布日期", justify="center", style="dim")
     table.add_column("新闻标题", style="bold white")
     table.add_column("ID", justify="center", style="dim")
 
     for a in articles:
-        table.add_row(a.get("date", ""), a.get("title", ""), str(a.get("id", "")))
+        is_read = a.get("is_read", False)
+        status_badge = "[dim]已读[/dim]" if is_read else "[bold yellow]● 新[/bold yellow]"
+        table.add_row(status_badge, a.get("date", ""), a.get("title", ""), str(a.get("id", "")))
     console.print(table)
 
 # ==================== 6. 每日简报 (daily) ====================
