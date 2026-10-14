@@ -379,3 +379,55 @@ def test_water_engine_get_acc_cost_info_mock():
     # 1.50 + 0.30 + 12.80 = 14.60
     assert summary["total_cost"] == 14.60
 
+def test_plan_service_parsing_and_statistics():
+    from unittest.mock import MagicMock
+    from bs4 import BeautifulSoup
+    from hrbust.services.plan_svc import PlanService
+
+    mock_engine = MagicMock()
+    svc = PlanService(mock_engine)
+
+    # 1. 模拟暂无教学计划
+    mock_no_plan_html = "<html><body>暂无教学计划数据</body></html>"
+    mock_engine.access_module.return_value = "http://fake_jwzx/plan"
+    mock_engine.get_page.return_value = BeautifulSoup(mock_no_plan_html, "html.parser")
+
+    res_empty = svc.get_plan()
+    assert res_empty["has_plan"] is False
+    assert len(res_empty["courses"]) == 0
+
+    # 2. 模拟正常培养方案表格
+    mock_plan_html = """
+    <html>
+      <table>
+        <tr><th>序号</th><th>课程代码</th><th>课程名称</th><th>课程性质</th><th>学分</th><th>建议学期</th><th>考核方式</th><th>修读状态</th></tr>
+        <tr><td>1</td><td>CS001</td><td>高等数学A(1)</td><td>必修</td><td>5.0</td><td>第1学期</td><td>考试</td><td>85 (已通过)</td></tr>
+        <tr><td>2</td><td>CS002</td><td>大学英语(1)</td><td>必修</td><td>3.0</td><td>第1学期</td><td>考试</td><td>已修</td></tr>
+        <tr><td>3</td><td>CS003</td><td>数据结构与算法</td><td>必修</td><td>4.0</td><td>第3学期</td><td>考试</td><td>未修</td></tr>
+        <tr><td>4</td><td>CS004</td><td>Python数据分析</td><td>选修</td><td>2.0</td><td>第4学期</td><td>考查</td><td>未修</td></tr>
+      </table>
+    </html>
+    """
+    mock_engine.get_page.return_value = BeautifulSoup(mock_plan_html, "html.parser")
+    res_normal = svc.get_plan()
+
+    assert res_normal["has_plan"] is True
+    assert len(res_normal["courses"]) == 4
+
+    summary = res_normal["summary"]
+    # 5.0 + 3.0 + 4.0 + 2.0 = 14.0
+    assert summary["total_plan_credits"] == 14.0
+    # 5.0 + 3.0 = 8.0
+    assert summary["completed_credits"] == 8.0
+    # 14.0 - 8.0 = 6.0
+    assert summary["remaining_credits"] == 6.0
+    # 8.0 / 14.0 = 57.1%
+    assert summary["completion_rate"] == 57.1
+    assert summary["completed_courses"] == 2
+    assert summary["remaining_courses"] == 2
+
+    # 分类过滤测试
+    res_elective = svc.get_plan(category_filter="选修")
+    assert len(res_elective["courses"]) == 1
+    assert res_elective["courses"][0]["course_name"] == "Python数据分析"
+

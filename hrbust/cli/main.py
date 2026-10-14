@@ -466,6 +466,61 @@ def card(
         f"累计消费支出: [bold yellow on black] ¥ {summary.get('total_cost')} [/bold yellow on black]"
     )
 
+# ==================== 8.9 本科培养方案学分审查 (plan) ====================
+@app.command(name="plan")
+def plan(
+    cat: str = typer.Option(None, "--cat", "-c", help="按课程性质类别筛选（如: 必修、选修、通识）"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出培养方案数据")
+):
+    """毕业学分审查：查询本科专业教学计划大纲、已修/尚欠学分与完成度 (moduleId=2070)"""
+    engine = _ensure_auth()
+    from ..services.plan_svc import PlanService
+    svc = PlanService(engine)
+    with console.status("[cyan]正在拉取专业培养方案与个人教学计划...[/cyan]"):
+        res = svc.get_plan(category_filter=cat)
+
+    if json_mode:
+        import json
+        console.print(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+
+    courses = res.get("courses", [])
+    summary = res.get("summary", {})
+
+    if not courses:
+        console.print(f"[yellow]{res.get('msg', '当前暂无教学计划数据')}[/yellow]")
+        return
+
+    table = Table(title=f"哈理工本科专业培养方案 (共 {summary.get('total_courses', len(courses))} 门课程)", border_style="green")
+    table.add_column("序号", justify="center", style="dim")
+    table.add_column("课程名称", style="bold white")
+    table.add_column("性质类别", justify="center")
+    table.add_column("学分", justify="center")
+    table.add_column("建议学期", justify="center", style="dim")
+    table.add_column("考核方式", justify="center", style="dim")
+    table.add_column("修读状态", justify="center")
+
+    for idx, c in enumerate(courses, 1):
+        status_styled = "[bold green]✔ 已修得[/bold green]" if c.get("completed") else "[yellow]⏳ 未修读[/yellow]"
+        table.add_row(
+            str(idx),
+            c.get("course_name", ""),
+            c.get("category", "必修"),
+            str(c.get("credit", 0.0)),
+            c.get("suggest_term", ""),
+            c.get("exam_method", "考试"),
+            status_styled
+        )
+
+    console.print(table)
+    console.print(
+        f"[bold cyan]🎓 培养方案毕业完成度[/bold cyan]: "
+        f"计划总学分: [bold green]{summary.get('total_plan_credits')}[/bold green]  |  "
+        f"已修得: [bold green]{summary.get('completed_credits')}[/bold green]  |  "
+        f"尚欠学分: [bold red]{summary.get('remaining_credits')}[/bold red]  |  "
+        f"修读完成率: [bold yellow on black] {summary.get('completion_rate')}% [/bold yellow on black]"
+    )
+
 # ==================== 9. 办事大厅与水控扫码登录 (qr) ====================
 @app.command(name="qr")
 def qr_login():
