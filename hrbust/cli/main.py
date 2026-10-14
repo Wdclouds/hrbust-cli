@@ -72,15 +72,15 @@ def water():
         ))
         raise typer.Exit(code=1)
 
-    if not username:
-        from ..core.auth import get_cas_credentials
+    from ..core.auth import get_water_account, get_cas_credentials
+    account = get_water_account()
+    if not account:
         cas_u, _ = get_cas_credentials()
-        username = cas_u or Prompt.ask("请输入学号")
+        account = cas_u or username or "16264"
 
     with console.status("[cyan]正在获取浴场实时空闲大盘...[/cyan]"):
         try:
-            info_b64 = water_eng.aes_encrypt(username, username)
-            status_list = svc.get_dashboard(info_b64, token)
+            status_list = svc.get_dashboard(raw_info or account, token)
         except Exception as e:
             console.print(f"[bold red][错误] 获取浴场状态异常: {e}[/bold red]")
             raise typer.Exit(code=1)
@@ -115,8 +115,8 @@ def water():
         return
 
     target = mapping[choice]
-    with console.status(f"[cyan]正在为学号 {username} 申请 {target['name']} 预约码...[/cyan]"):
-        res = svc.book_bath(target["class_no"], username, username, token)
+    with console.status(f"[cyan]正在为账号 {account} 申请 {target['name']} 预约码...[/cyan]"):
+        res = svc.book_bath(target["class_no"], account, token)
 
     is_success = res.get("success") or res.get("RetNo") == 0 or res.get("ret_no") == 0
     book_code = res.get("book_code") or res.get("BookCode")
@@ -414,17 +414,21 @@ def card(
     from ..core.auth import get_credentials, get_water_token
 
     w_info, w_tok = get_water_token()
-    u, _ = get_credentials()
-
     if not w_tok:
-        console.print("[bold yellow]未检测到水控凭据！请先运行 hrbust qr 扫码登录或 hrbust login 绑定学号密码。[/bold yellow]")
+        console.print("[bold yellow]未检测到网上办事大厅凭据！请先运行 hrbust auth 扫码或输入统一密码认证。[/bold yellow]")
         raise typer.Exit(code=1)
 
-    account = u or "2306010309"
+    from ..core.auth import get_water_account, get_cas_credentials
+    account = get_water_account()
+    if not account:
+        cas_u, _ = get_cas_credentials()
+        u, _ = get_credentials()
+        account = cas_u or u or "16264"
+
     svc = WaterService()
     with console.status("[cyan]正在拉取一卡通消费流水账单...[/cyan]"):
         try:
-            res = svc.get_cost_records(account, account, w_tok, start_date=start, end_date=end)
+            res = svc.get_cost_records(account, w_tok, start_date=start, end_date=end)
         except Exception as e:
             console.print(f"[bold red][错误] 获取一卡通账单失败: {e}[/bold red]")
             raise typer.Exit(code=1)

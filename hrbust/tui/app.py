@@ -512,9 +512,12 @@ class HrbustTuiApp(App):
             return
 
         try:
-            account = u or "2101010101"
-            raw_info = w_info or self.water_engine.aes_encrypt(account, account)
-            status_list = self.water_svc.get_dashboard(raw_info, w_tok)
+            from ..core.auth import get_water_account, get_cas_credentials
+            account = get_water_account()
+            if not account:
+                cas_u, _ = get_cas_credentials()
+                account = cas_u or u or "16264"
+            status_list = self.water_svc.get_dashboard(w_info or account, w_tok)
             self.current_water_status = status_list
             self.call_from_thread(self._populate_water_table, status_list)
         except Exception as e:
@@ -562,12 +565,16 @@ class HrbustTuiApp(App):
         target = self.current_water_status[cursor_row] if 0 <= cursor_row < len(self.current_water_status) else self.current_water_status[0]
         u, _ = get_credentials()
         _, w_tok = get_water_token()
-        account = u or "2101010101"
+        from ..core.auth import get_water_account, get_cas_credentials
+        account = get_water_account()
+        if not account:
+            cas_u, _ = get_cas_credentials()
+            account = cas_u or u or "16264"
         token = w_tok or "default_token"
 
         self.notify(f"正在申请 {target['name']} 出水预约码...", title="水控预约")
         try:
-            res = self.water_svc.book_bath(target["class_no"], account, account, token)
+            res = self.water_svc.book_bath(target["class_no"], account, token)
             is_success = res.get("success") or res.get("RetNo") == 0 or res.get("ret_no") == 0
             if is_success:
                 code = res.get("BookCode") or res.get("book_code") or "8888"
@@ -918,10 +925,15 @@ class HrbustTuiApp(App):
             self.notify("未检测到网上办事大厅凭据，已为你跳转至办事大厅官方认证中心！", title="需要认证", severity="warning")
             return
 
-        account = u or "2306010309"
+        from ..core.auth import get_water_account, get_cas_credentials
+        account = get_water_account()
+        if not account:
+            cas_u, _ = get_cas_credentials()
+            account = cas_u or u or "16264"
+
         self.notify("正在拉取一卡通消费流水账单...", title="消费账单")
         try:
-            res = self.water_svc.get_cost_records(account, account, w_tok)
+            res = self.water_svc.get_cost_records(account, w_tok)
             self.call_from_thread(self._populate_card_table, res)
             records = res.get("records", [])
             summary = res.get("summary", {})

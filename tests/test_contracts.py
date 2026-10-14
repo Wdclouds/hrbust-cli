@@ -88,19 +88,33 @@ def test_water_engine_fetch_token_by_cas_mock():
     """
     mock_resp_cas = MagicMock()
     mock_resp_cas.text = mock_cas_html
+    mock_resp_cas.url = "http://auth.hrbust.edu.cn/authserver/login"
 
-    # 2. Mock POST CAS 登录 302 重定向
-    mock_resp_post = MagicMock()
-    mock_resp_post.headers = {"Location": "https://yktks.hrbust.edu.cn/?ticket=ST-998877-cas"}
+    # 2. Mock 页面跳转链
+    mock_resp_cb = MagicMock()
+    mock_resp_cb.status_code = 302
+    mock_resp_cb.headers = {"Location": "https://ecard.hrbust.edu.cn/plat/?name=loginTransit&ticket=ecard_mock_ticket_123"}
 
-    # 3. Mock SsoCheck
+    mock_resp_target = MagicMock()
+    mock_resp_target.status_code = 302
+    mock_resp_target.headers = {"Location": "https://ecard.hrbust.edu.cn/plat/?name=loginTransit&ticket=ecard_mock_ticket_123"}
+
+    # 3. Mock OAuth Token
+    mock_resp_oauth = MagicMock()
+    mock_resp_oauth.json.return_value = {"access_token": "mock_oauth_tok_xyz"}
+
+    # 4. Mock Redirect 取得 yktks ticket
+    mock_resp_redir = MagicMock()
+    mock_resp_redir.headers = {"Location": "https://yktks.hrbust.edu.cn/?ticket=yktks_ticket_888"}
+
+    # 5. Mock SsoCheck
     mock_resp_sso = MagicMock()
     mock_resp_sso.json.return_value = {
         "Ret": 0,
-        "User": {"ACCOUNT": "6010309"}
+        "User": {"ACCOUNT": "16264"}
     }
 
-    # 4. Mock GetToken
+    # 6. Mock GetToken
     mock_resp_token = MagicMock()
     mock_resp_token.json.return_value = {
         "RetNo": 0,
@@ -108,15 +122,26 @@ def test_water_engine_fetch_token_by_cas_mock():
     }
 
     def mock_get(url, **kwargs):
-        if "authserver/login" in url:
+        if "login/wisedu" in url or "authserver" in url:
             return mock_resp_cas
+        if "callback/wisedu" in url:
+            return mock_resp_cb
+        if "loginTransit" in url:
+            return mock_resp_target
+        if "berserker-base/redirect" in url:
+            return mock_resp_redir
         if "GetToken" in url:
             return mock_resp_token
         return MagicMock()
 
     def mock_post(url, **kwargs):
-        if "authserver/login" in url:
-            return mock_resp_post
+        if "authserver" in url:
+            mock_cas_sub = MagicMock()
+            mock_cas_sub.status_code = 302
+            mock_cas_sub.headers = {"Location": "https://ecard.hrbust.edu.cn/berserker-auth/cas/callback/wisedu?ticket=ST-123"}
+            return mock_cas_sub
+        if "oauth/token" in url:
+            return mock_resp_oauth
         if "SsoCheck" in url:
             return mock_resp_sso
         return MagicMock()
@@ -127,7 +152,7 @@ def test_water_engine_fetch_token_by_cas_mock():
     ok, msg, token, account = engine.fetch_token_by_cas("2306010309", "pass123")
     assert ok is True
     assert token == "auto_cas_token_xyz"
-    assert account == "6010309"
+    assert account == "16264"
 
 def test_water_service_auto_auth_and_sync_contract(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "CONFIG_DIR", tmp_path)
@@ -255,6 +280,20 @@ def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
     mock_img_resp = MagicMock()
     mock_img_resp.content = buf.getvalue()
 
+    mock_cb_resp = MagicMock()
+    mock_cb_resp.status_code = 302
+    mock_cb_resp.headers = {"Location": "https://ecard.hrbust.edu.cn/plat/?name=loginTransit&ticket=ecard_qr_ticket_888"}
+
+    mock_transit_resp = MagicMock()
+    mock_transit_resp.status_code = 302
+    mock_transit_resp.headers = {"Location": "https://ecard.hrbust.edu.cn/plat/?name=loginTransit&ticket=ecard_qr_ticket_888"}
+
+    mock_oauth_resp = MagicMock()
+    mock_oauth_resp.json.return_value = {"access_token": "mock_qr_access_token"}
+
+    mock_redir_resp = MagicMock()
+    mock_redir_resp.headers = {"Location": "https://yktks.hrbust.edu.cn/?ticket=yktks_qr_ticket_999"}
+
     def _mock_get(url, *args, **kwargs):
         if "getToken" in url:
             return mock_token_resp
@@ -264,6 +303,12 @@ def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
             mock_st = MagicMock()
             mock_st.text = "1"
             return mock_st
+        elif "callback/wisedu" in url:
+            return mock_cb_resp
+        elif "loginTransit" in url:
+            return mock_transit_resp
+        elif "berserker-base/redirect" in url:
+            return mock_redir_resp
         elif "GetToken" in url:
             mock_tok = MagicMock()
             mock_tok.json.return_value = {"RetNo": 0, "Token": "tok_qr_mock_999"}
@@ -271,13 +316,16 @@ def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
         return MagicMock()
 
     def _mock_post(url, *args, **kwargs):
-        if "login" in url:
+        if "display=qrLogin" in url or "authserver" in url:
             mock_post_resp = MagicMock()
-            mock_post_resp.headers = {"Location": "https://yktks.hrbust.edu.cn/?ticket=ST-qr-ticket-888"}
+            mock_post_resp.status_code = 302
+            mock_post_resp.headers = {"Location": "https://ecard.hrbust.edu.cn/berserker-auth/cas/callback/wisedu?ticket=ST-qr-ticket-888"}
             return mock_post_resp
+        elif "oauth/token" in url:
+            return mock_oauth_resp
         elif "SsoCheck" in url:
             mock_sso = MagicMock()
-            mock_sso.json.return_value = {"Ret": 0, "User": {"ACCOUNT": "2306010309"}}
+            mock_sso.json.return_value = {"Ret": 0, "User": {"ACCOUNT": "16264"}}
             return mock_sso
         return MagicMock()
 
@@ -295,7 +343,7 @@ def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
     finish_res = svc.finish_qr_login("QR-mock-uuid-12345")
     assert finish_res["success"] is True
     assert finish_res["token"] == "tok_qr_mock_999"
-    assert finish_res["account"] == "2306010309"
+    assert finish_res["account"] == "16264"
 
     # 验证本地已自动安全落盘
     _, saved_tok = auth.get_water_token()

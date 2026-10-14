@@ -131,9 +131,17 @@ def set_cas_credentials(u: str, p: str):
 def get_water_token() -> Tuple[Optional[str], Optional[str]]:
     return get_password("water_raw_info"), get_password("water_token")
 
-def set_water_token(arg1: str, arg2: Optional[str] = None):
+def get_water_account() -> Optional[str]:
+    """获取一卡通物理卡号 (ACCOUNT/ano)"""
+    return get_password("water_account")
+
+def set_water_account(account: str):
+    """保存一卡通物理卡号 (ACCOUNT/ano)"""
+    set_password("water_account", str(account))
+
+def set_water_token(arg1: str, arg2: Optional[str] = None, account: Optional[str] = None):
     """
-    保存水控凭据。
+    保存水控凭据与真实一卡通账号。
     支持双参数 (raw_info, token) 或单参数 (token)。
     """
     if arg2 is not None:
@@ -142,6 +150,8 @@ def set_water_token(arg1: str, arg2: Optional[str] = None):
         set_password("water_token", token)
     else:
         set_password("water_token", arg1)
+    if account:
+        set_password("water_account", str(account))
 
 def clear_all_credentials():
     delete_password("username")
@@ -150,6 +160,7 @@ def clear_all_credentials():
     delete_password("cas_password")
     delete_password("water_raw_info")
     delete_password("water_token")
+    delete_password("water_account")
     if VAULT_FILE.exists():
         try:
             VAULT_FILE.unlink()

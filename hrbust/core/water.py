@@ -140,7 +140,11 @@ class WaterEngine:
 
     # ==================== 方案 1: CAS 统一认证全自动换票 ====================
     CAS_URL = "https://auth.hrbust.edu.cn/authserver/login"
-    SERVICE_URL = "https://yktks.hrbust.edu.cn/"
+    ECARD_CAS_SERVICE = "https://ecard.hrbust.edu.cn/plat-pc/serviceclassification"
+    ECARD_SSO_ENTRY = "https://ecard.hrbust.edu.cn/berserker-auth/cas/login/wisedu?targetUrl=https://ecard.hrbust.edu.cn/plat/?name=loginTransit"
+    OAUTH_TOKEN_URL = "https://ecard.hrbust.edu.cn/berserker-auth/oauth/token"
+    OAUTH_BASIC_AUTH = "Basic bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm06bW9iaWxlX3NlcnZpY2VfcGxhdGZvcm1fc2VjcmV0"
+    REDIRECT_URL_TEMPLATE = "https://ecard.hrbust.edu.cn/berserker-base/redirect?type=app&synjones-auth={access_token}&appId=113&synAccessSource=pc"
     SSO_CHECK_URL = "https://yktks.hrbust.edu.cn/accountapi/berserker-base/user/Sso/SsoCheck"
     PKEY_B64 = "3n4DdO47LWH2Co/WfpbdyA=="
     SIGN_PASSWORD = "kv7XjPzrDNJY0pdZ#"
@@ -158,39 +162,115 @@ class WaterEngine:
         enc = cipher.encrypt(pad(plain.encode("utf-8"), AES.block_size))
         return base64.b64encode(enc).decode("utf-8")
 
+    def _exchange_ecard_ticket_to_water_token(self, ecard_ticket: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
+        """
+        核心换票流水线：
+        一卡通 ST 票据 -> OAuth access_token -> Berserker 分发 -> SsoCheck 真实 ACCOUNT -> 生成水控 Token
+        :return: (is_success, msg, token, account)
+        """
+        import re
+        import json
+        import datetime
+
+        # 1. 换取校园卡平台 OAuth 访问令牌
+        token_headers = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Authorization": self.OAUTH_BASIC_AUTH
+        }
+        token_data = {
+            "username": ecard_ticket,
+            "password": ecard_ticket,
+            "grant_type": "password",
+            "scope": "all",
+            "loginFrom": "pc",
+            "logintype": "sso"
+        }
+        try:
+            r_tok = self.session.post(self.OAUTH_TOKEN_URL, headers=token_headers, data=token_data, timeout=8).json()
+        except Exception as e:
+            return False, f"请求校园卡平台 OAuth Token 异常: {e}", None, None
+
+        access_token = r_tok.get("access_token")
+        if not access_token:
+            err = r_tok.get("message") or r_tok.get("error_description") or "未知原因"
+            return False, f"一卡通平台票据换取失败: {err}", None, None
+
+        # 2. 携带 synjones-auth 请求 redirect 跳转以获取控水系统票据
+        redir_url = self.REDIRECT_URL_TEMPLATE.format(access_token=access_token)
+        auth_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "synjones-auth": f"Bearer {access_token}"
+        }
+        try:
+            r_redir = self.session.get(redir_url, headers=auth_headers, allow_redirects=False, timeout=8)
+        except Exception as e:
+            return False, f"请求水控系统应用跳转异常: {e}", None, None
+
+        jump_loc = r_redir.headers.get("Location", "")
+        m_ticket = re.search(r"ticket=([^&]+)", jump_loc)
+        if not m_ticket:
+            return False, "未能从一卡通平台提取到水控服务票据", None, None
+        yktks_ticket = m_ticket.group(1)
+
+        # 3. 访问 SsoCheck 换取真实一卡通账号 ACCOUNT (ano)
+        try:
+            r_sso = self.session.post(self.SSO_CHECK_URL, data={"ticket": yktks_ticket}, timeout=8).json()
+        except Exception as e:
+            return False, f"水控单点验票异常: {e}", None, None
+
+        if str(r_sso.get("Ret")) != "0":
+            return False, f"水控单点验票失败: {r_sso.get('Msg', '未知错误')}", None, None
+
+        user_info = r_sso.get("User") or {}
+        account = str(user_info.get("ACCOUNT") or user_info.get("account") or "")
+        if not account:
+            return False, "未能获取到一卡通真实账号 (ACCOUNT)", None, None
+
+        # 4. 调用 GetToken 派发实时可用的业务 Token
+        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        tok_payload = {
+            "userid": account,
+            "userpassword": self.SIGN_PASSWORD,
+            "time": time_str
+        }
+        enc_tok = self.aes_encrypt(json.dumps(tok_payload, separators=(",", ":")), self.PKEY_B64)
+        try:
+            r_token = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_tok}, timeout=8).json()
+        except Exception as e:
+            return False, f"请求水控 GetToken 接口异常: {e}", None, account
+
+        if r_token.get("RetNo") != 0:
+            return False, f"生成水控 Token 失败: {r_token.get('RetDsp', '未知错误')}", None, account
+
+        token = r_token.get("Token")
+        return True, "认证并打通水控成功", token, account
+
     def fetch_token_by_cas(self, username: str, password: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
-        通过哈理工统一身份认证 (CAS) 全自动单点登录并换取水控 Token
+        通过哈理工统一身份认证 (CAS) 账号密码登录并换取真实一卡通与水控 Token
         :return: (is_success, message, token, account)
         """
-        import datetime
+        import re
         import urllib.parse
         from bs4 import BeautifulSoup
 
-        # 1. 访问 CAS 登录页提取 execution 与动态 salt
-        login_url = f"{self.CAS_URL}?service={urllib.parse.quote(self.SERVICE_URL)}"
+        # 1. 访问官方 SSO 入口，经重定向到达 CAS 登录页
         try:
-            r = self.session.get(login_url, timeout=8)
-            soup = BeautifulSoup(r.text, "html.parser")
+            r_cas_page = self.session.get(self.ECARD_SSO_ENTRY, allow_redirects=True, timeout=8)
+            soup = BeautifulSoup(r_cas_page.text, "html.parser")
         except Exception as e:
             return False, f"连接统一身份认证中心异常: {e}", None, None
 
-        exec_tag = soup.find("input", attrs={"name": "execution"})
-        execution = exec_tag.get("value", "e1s1") if exec_tag else "e1s1"
+        salt_tag = soup.find(id="pwdEncryptSalt")
+        if not salt_tag or not salt_tag.get("value"):
+            return False, "未能从 CAS 统一认证页提取到动态加密盐值", None, None
 
-        salt = ""
-        for inp in soup.find_all("input"):
-            if inp.get("id") == "pwdEncryptSalt" and inp.get("value"):
-                salt = str(inp.get("value") or "")
-                break
-
-        if not salt:
-            return False, "未能从 CAS 页面提取到动态加密盐值", None, None
+        salt = str(salt_tag.get("value") or "")
+        exec_tag = soup.find("input", {"name": "execution"})
+        execution = exec_tag.get("value", "e1s1") if exec_tag and hasattr(exec_tag, "get") else "e1s1"
 
         enc_pwd = self.encrypt_cas_password(password, salt)
-
-        # 2. 提交 CAS 登录表单
-        data = {
+        post_data = {
             "username": username,
             "password": enc_pwd,
             "execution": execution,
@@ -201,50 +281,31 @@ class WaterEngine:
             "rmShown": "1"
         }
 
+        # 2. 提交 CAS 登录表单
         try:
-            r_post = self.session.post(login_url, data=data, allow_redirects=False, timeout=8)
+            r_cas_submit = self.session.post(r_cas_page.url, data=post_data, allow_redirects=False, timeout=8)
         except Exception as e:
-            return False, f"提交 CAS 登录认证异常: {e}", None, None
+            return False, f"提交统一身份认证表单异常: {e}", None, None
 
-        loc = r_post.headers.get("Location", "")
-        if "ticket=" not in loc:
-            return False, "CAS 统一认证未通过，请检查学号或统一身份认证密码", None, None
+        cas_loc = r_cas_submit.headers.get("Location", "")
+        if "ticket=" not in cas_loc and "callback" not in cas_loc:
+            return False, "统一身份认证未通过，请检查学号或统一身份认证密码", None, None
 
-        # 提取 ticket
-        parsed = urllib.parse.urlparse(loc)
-        qs = urllib.parse.parse_qs(parsed.query)
-        ticket = qs.get("ticket", [""])[0]
-
-        # 3. SsoCheck 换取真实一卡通账号 ano
+        # 3. 访问 callback 页面换取 ecard ticket
         try:
-            r_sso = self.session.post(self.SSO_CHECK_URL, data={"ticket": ticket}, timeout=8).json()
+            r_cb = self.session.get(cas_loc, allow_redirects=False, timeout=8)
+            cb_loc = r_cb.headers.get("Location", "")
+            r_target = self.session.get(cb_loc, allow_redirects=False, timeout=8)
+            transit_url = r_target.headers.get("Location", "")
         except Exception as e:
-            return False, f"请求一卡通 SSO 验票接口异常: {e}", None, None
+            return False, f"统一认证回调换票异常: {e}", None, None
 
-        if r_sso.get("Ret") not in ("0", 0):
-            return False, f"一卡通 SSO 验票失败: {r_sso.get('Msg', '未知错误')}", None, None
+        m_ticket = re.search(r"ticket=([^&]+)", transit_url)
+        if not m_ticket:
+            return False, "未能从认证跳转中获取一卡通 ticket", None, None
 
-        user_info = r_sso.get("User", {})
-        account = str(user_info.get("ACCOUNT", username))
-
-        # 4. 换取专属水控 Token
-        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        payload = {
-            "userid": account,
-            "userpassword": self.SIGN_PASSWORD,
-            "time": time_str
-        }
-        enc_info = self.aes_encrypt(json.dumps(payload, separators=(",", ":")), self.PKEY_B64)
-        try:
-            r_tok = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_info}, timeout=8).json()
-        except Exception as e:
-            return False, f"请求水控 GetToken 接口异常: {e}", None, account
-
-        if r_tok.get("RetNo") != 0:
-            return False, f"生成水控 Token 失败: {r_tok.get('RetDsp', '未知错误')}", None, account
-
-        token = r_tok.get("Token")
-        return True, "全自动 CAS 换票成功", token, account
+        ecard_ticket = urllib.parse.unquote(m_ticket.group(1))
+        return self._exchange_ecard_ticket_to_water_token(ecard_ticket)
 
     # ==================== 方案 2: 办事大厅 CAS 移动端扫码登录 ====================
     QR_TOKEN_URL = "https://auth.hrbust.edu.cn/authserver/qrCode/getToken"
@@ -350,15 +411,14 @@ class WaterEngine:
 
     def complete_cas_qr_login(self, uuid: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
         """
-        当二维码状态为 '1' 时，提交扫码登录表单并换取水控 Token
+        当二维码状态为 '1' (手机已确认) 时，提交扫码登录表单并通过一卡通全自动换取水控 Token
         :return: (is_success, msg, token, account)
         """
-        import json
-        import datetime
+        import re
         import urllib.parse
 
-        # 1. 提交 qrLoginForm 表单
-        login_url = f"{self.CAS_URL}?display=qrLogin&service={urllib.parse.quote(self.SERVICE_URL)}"
+        service_param = "https://ecard.hrbust.edu.cn/berserker-auth/cas/callback/wisedu?redirectUrl=https%3A%2F%2Fecard.hrbust.edu.cn%2Fplat%2F%3Fname%3DloginTransit"
+        login_url = f"{self.CAS_URL}?display=qrLogin&service={urllib.parse.quote(service_param, safe='')}"
         post_data = {
             "lt": "",
             "uuid": uuid,
@@ -374,42 +434,22 @@ class WaterEngine:
         except Exception as e:
             return False, f"提交 CAS 扫码表单异常: {e}", None, None
 
-        loc = r_post.headers.get("Location", "")
-        if "ticket=" not in loc:
-            return False, "CAS 扫码未返回有效票据，登录未通过", None, None
+        cas_loc = r_post.headers.get("Location", "")
+        if not cas_loc:
+            return False, "CAS 扫码未返回有效重定向，登录未通过", None, None
 
-        # 提取 ticket
-        parsed = urllib.parse.urlparse(loc)
-        qs = urllib.parse.parse_qs(parsed.query)
-        ticket = qs.get("ticket", [""])[0]
-
-        # 2. SsoCheck 换取真实一卡通卡号
+        # 访问 callback 页面换取 ecard ticket
         try:
-            r_sso = self.session.post(self.SSO_CHECK_URL, data={"ticket": ticket}, timeout=8).json()
+            r_cb = self.session.get(cas_loc, allow_redirects=False, timeout=8)
+            cb_loc = r_cb.headers.get("Location", "")
+            r_target = self.session.get(cb_loc, allow_redirects=False, timeout=8)
+            transit_url = r_target.headers.get("Location", "")
         except Exception as e:
-            return False, f"请求一卡通 SSO 验票接口异常: {e}", None, None
+            return False, f"扫码认证回调换票异常: {e}", None, None
 
-        if r_sso.get("Ret") not in ("0", 0):
-            return False, f"一卡通 SSO 验票失败: {r_sso.get('Msg', '未知错误')}", None, None
+        m_ticket = re.search(r"ticket=([^&]+)", transit_url)
+        if not m_ticket:
+            return False, "未能从扫码跳转中获取一卡通 ticket", None, None
 
-        user_info = r_sso.get("User", {})
-        account = str(user_info.get("ACCOUNT", ""))
-
-        # 3. 换取水控业务专属 Token
-        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        payload = {
-            "userid": account,
-            "userpassword": self.SIGN_PASSWORD,
-            "time": time_str
-        }
-        enc_info = self.aes_encrypt(json.dumps(payload, separators=(",", ":")), self.PKEY_B64)
-        try:
-            r_tok = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_info}, timeout=8).json()
-        except Exception as e:
-            return False, f"请求水控 GetToken 接口异常: {e}", None, account
-
-        if r_tok.get("RetNo") != 0:
-            return False, f"生成水控 Token 失败: {r_tok.get('RetDsp', '未知错误')}", None, account
-
-        token = r_tok.get("Token")
-        return True, "扫码单点登录成功", token, account
+        ecard_ticket = urllib.parse.unquote(m_ticket.group(1))
+        return self._exchange_ecard_ticket_to_water_token(ecard_ticket)
