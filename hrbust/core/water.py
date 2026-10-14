@@ -232,3 +232,171 @@ class WaterEngine:
 
         token = r_tok.get("Token")
         return True, "全自动 CAS 换票成功", token, account
+
+    # ==================== 方案 2: 办事大厅 CAS 移动端扫码登录 ====================
+    QR_TOKEN_URL = "https://auth.hrbust.edu.cn/authserver/qrCode/getToken"
+    QR_CODE_URL = "https://auth.hrbust.edu.cn/authserver/qrCode/getCode"
+    QR_STATUS_URL = "https://auth.hrbust.edu.cn/authserver/qrCode/getStatus.htl"
+
+    @staticmethod
+    def qr_png_to_unicode(png_bytes: bytes) -> str:
+        """
+        将 400x400 的 CAS 二维码 PNG 图片无损降采样为终端 Unicode 半高字符块
+        使用模块尺寸精准对齐，生成手机摄像头可秒扫的纯文本二维码
+        """
+        import io
+        from PIL import Image, ImageOps
+
+        img = Image.open(io.BytesIO(png_bytes)).convert("1")
+        inv = ImageOps.invert(img.convert("L"))
+        bbox = inv.getbbox()
+        if not bbox:
+            return ""
+
+        x0, y0 = bbox[0], bbox[1]
+        # 探测左上角 Finder pattern 宽度 (7 个 module)
+        finder_px = 0
+        for x in range(x0, bbox[2]):
+            if img.getpixel((x, y0 + 2)) == 0:
+                finder_px += 1
+            else:
+                break
+        module_size = max(1.0, finder_px / 7.0)
+        n_modules = round((bbox[2] - x0) / module_size)
+
+        # 加 2 个 module 的白边 (quiet zone) 保证识别率
+        quiet = 2
+        total_dim = n_modules + 2 * quiet
+        matrix = [[0] * total_dim for _ in range(quiet)]
+
+        for r in range(n_modules):
+            cy = int(y0 + (r + 0.5) * module_size)
+            row = [0] * quiet
+            for c in range(n_modules):
+                cx = int(x0 + (c + 0.5) * module_size)
+                is_dark = 1 if img.getpixel((cx, cy)) == 0 else 0
+                row.append(is_dark)
+            row.extend([0] * quiet)
+            matrix.append(row)
+
+        for _ in range(quiet):
+            matrix.append([0] * total_dim)
+
+        # 每 2 行纵向像素合并为 1 个 Unicode 字符 (▀ / ▄ / █ / 空格)
+        lines = []
+        for y in range(0, len(matrix), 2):
+            line = ""
+            for x in range(len(matrix[0])):
+                t = matrix[y][x]
+                b = matrix[y + 1][x] if (y + 1) < len(matrix) else 0
+                if t and b:
+                    line += "█"
+                elif t and not b:
+                    line += "▀"
+                elif not t and b:
+                    line += "▄"
+                else:
+                    line += " "
+            lines.append(line)
+        return "\n".join(lines)
+
+    def fetch_cas_qr_session(self) -> Dict[str, Any]:
+        """
+        向 CAS 申请二维码会话并获取渲染后的字符二维码
+        :return: {"uuid": uuid, "qr_ascii": qr_ascii, "raw_img": bytes}
+        """
+        import time
+        ts = int(time.time() * 1000)
+        res = self.session.get(f"{self.QR_TOKEN_URL}?ts={ts}", timeout=8)
+        uuid = res.text.strip()
+        if not uuid or not uuid.startswith("QR-"):
+            raise RuntimeError(f"获取 CAS 二维码 Token 失败: {uuid}")
+
+        img_res = self.session.get(f"{self.QR_CODE_URL}?uuid={uuid}", timeout=8)
+        qr_ascii = self.qr_png_to_unicode(img_res.content)
+
+        return {
+            "uuid": uuid,
+            "qr_ascii": qr_ascii,
+            "raw_img": img_res.content
+        }
+
+    def check_cas_qr_status(self, uuid: str) -> str:
+        """
+        轮询 CAS 二维码扫描状态
+        :return:
+          '0': 等待扫码
+          '2': 手机已扫码，等待确认
+          '1': 手机已确认登录授权成功！
+          '3': 二维码已超时失效
+        """
+        import time
+        ts = int(time.time() * 1000)
+        res = self.session.get(f"{self.QR_STATUS_URL}?ts={ts}&uuid={uuid}", timeout=8)
+        return res.text.strip()
+
+    def complete_cas_qr_login(self, uuid: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
+        """
+        当二维码状态为 '1' 时，提交扫码登录表单并换取水控 Token
+        :return: (is_success, msg, token, account)
+        """
+        import json
+        import datetime
+        import urllib.parse
+
+        # 1. 提交 qrLoginForm 表单
+        login_url = f"{self.CAS_URL}?display=qrLogin&service={urllib.parse.quote(self.SERVICE_URL)}"
+        post_data = {
+            "lt": "",
+            "uuid": uuid,
+            "cllt": "qrLogin",
+            "dllt": "generalLogin",
+            "execution": "e1s1",
+            "_eventId": "submit",
+            "rmShown": "1"
+        }
+
+        try:
+            r_post = self.session.post(login_url, data=post_data, allow_redirects=False, timeout=8)
+        except Exception as e:
+            return False, f"提交 CAS 扫码表单异常: {e}", None, None
+
+        loc = r_post.headers.get("Location", "")
+        if "ticket=" not in loc:
+            return False, "CAS 扫码未返回有效票据，登录未通过", None, None
+
+        # 提取 ticket
+        parsed = urllib.parse.urlparse(loc)
+        qs = urllib.parse.parse_qs(parsed.query)
+        ticket = qs.get("ticket", [""])[0]
+
+        # 2. SsoCheck 换取真实一卡通卡号
+        try:
+            r_sso = self.session.post(self.SSO_CHECK_URL, data={"ticket": ticket}, timeout=8).json()
+        except Exception as e:
+            return False, f"请求一卡通 SSO 验票接口异常: {e}", None, None
+
+        if r_sso.get("Ret") not in ("0", 0):
+            return False, f"一卡通 SSO 验票失败: {r_sso.get('Msg', '未知错误')}", None, None
+
+        user_info = r_sso.get("User", {})
+        account = str(user_info.get("ACCOUNT", ""))
+
+        # 3. 换取水控业务专属 Token
+        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        payload = {
+            "userid": account,
+            "userpassword": self.SIGN_PASSWORD,
+            "time": time_str
+        }
+        enc_info = self.aes_encrypt(json.dumps(payload, separators=(",", ":")), self.PKEY_B64)
+        try:
+            r_tok = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_info}, timeout=8).json()
+        except Exception as e:
+            return False, f"请求水控 GetToken 接口异常: {e}", None, account
+
+        if r_tok.get("RetNo") != 0:
+            return False, f"生成水控 Token 失败: {r_tok.get('RetDsp', '未知错误')}", None, account
+
+        token = r_tok.get("Token")
+        return True, "扫码单点登录成功", token, account

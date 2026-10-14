@@ -208,3 +208,96 @@ def test_score_service_calculation_and_blocked():
     # 加权 GPA: (3.5*5 + 4.5*3) / 8 = (17.5 + 13.5) / 8 = 31 / 8 = 3.88
     assert summary["gpa"] == 3.88
 
+def test_water_engine_qr_png_to_unicode():
+    from PIL import Image
+    import io
+    from hrbust.core.water import WaterEngine
+
+    # 生成一个简单的 50x50 测试黑白图像模拟二维码
+    img = Image.new("1", (50, 50), color=1)
+    # 画一个 7x7 的左上角 finder block
+    for y in range(7):
+        for x in range(7):
+            img.putpixel((x, y), 0)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+
+    res_str = WaterEngine.qr_png_to_unicode(png_bytes)
+    assert len(res_str) > 0
+    assert any(c in res_str for c in ("█", "▀", "▄"))
+
+def test_water_service_qr_login_flow_mock(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+    from PIL import Image
+    import io
+    from hrbust.core.water import WaterEngine
+    from hrbust.services.water_svc import WaterService
+    import hrbust.core.auth as auth
+
+    monkeypatch.setattr(auth, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(auth, "VAULT_FILE", tmp_path / "vault.bin")
+
+    engine = WaterEngine()
+    svc = WaterService(engine)
+
+    # 1. 模拟 start_qr_login
+    mock_token_resp = MagicMock()
+    mock_token_resp.text = "QR-mock-uuid-12345"
+
+    img = Image.new("1", (50, 50), color=1)
+    for y in range(7):
+        for x in range(7):
+            img.putpixel((x, y), 0)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+
+    mock_img_resp = MagicMock()
+    mock_img_resp.content = buf.getvalue()
+
+    def _mock_get(url, *args, **kwargs):
+        if "getToken" in url:
+            return mock_token_resp
+        elif "getCode" in url:
+            return mock_img_resp
+        elif "getStatus.htl" in url:
+            mock_st = MagicMock()
+            mock_st.text = "1"
+            return mock_st
+        elif "GetToken" in url:
+            mock_tok = MagicMock()
+            mock_tok.json.return_value = {"RetNo": 0, "Token": "tok_qr_mock_999"}
+            return mock_tok
+        return MagicMock()
+
+    def _mock_post(url, *args, **kwargs):
+        if "login" in url:
+            mock_post_resp = MagicMock()
+            mock_post_resp.headers = {"Location": "https://yktks.hrbust.edu.cn/?ticket=ST-qr-ticket-888"}
+            return mock_post_resp
+        elif "SsoCheck" in url:
+            mock_sso = MagicMock()
+            mock_sso.json.return_value = {"Ret": 0, "User": {"ACCOUNT": "2306010309"}}
+            return mock_sso
+        return MagicMock()
+
+    engine.session.get = _mock_get
+    engine.session.post = _mock_post
+
+    # 测试完整扫码流转
+    session = svc.start_qr_login()
+    assert session["uuid"] == "QR-mock-uuid-12345"
+    assert len(session["qr_ascii"]) > 0
+
+    st = svc.check_qr_status("QR-mock-uuid-12345")
+    assert st == "1"
+
+    finish_res = svc.finish_qr_login("QR-mock-uuid-12345")
+    assert finish_res["success"] is True
+    assert finish_res["token"] == "tok_qr_mock_999"
+    assert finish_res["account"] == "2306010309"
+
+    # 验证本地已自动安全落盘
+    _, saved_tok = auth.get_water_token()
+    assert saved_tok == "tok_qr_mock_999"
+

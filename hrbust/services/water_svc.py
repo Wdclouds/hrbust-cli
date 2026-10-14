@@ -48,3 +48,39 @@ class WaterService:
             "token": None,
             "account": None,
         }
+
+    def start_qr_login(self) -> Dict[str, Any]:
+        """
+        发起 CAS 网上办事大厅移动端扫码登录会话
+        返回 uuid 与 Unicode 终端字符二维码
+        """
+        return self.engine.fetch_cas_qr_session()
+
+    def check_qr_status(self, uuid: str) -> str:
+        """
+        查询当前二维码扫描状态 ('0':等待, '2':已扫待确认, '1':成功, '3':失效)
+        """
+        return self.engine.check_cas_qr_status(uuid)
+
+    def finish_qr_login(self, uuid: str) -> Dict[str, Any]:
+        """
+        扫码确认完成后执行换票并持久化加密存储 Token
+        """
+        success, msg, token, account = self.engine.complete_cas_qr_login(uuid)
+        if success and token:
+            from ..core.auth import set_water_token
+            act = account or ""
+            raw_info = self.engine.aes_encrypt(act, act)
+            set_water_token(raw_info, token)
+            return {
+                "success": True,
+                "msg": msg,
+                "token": token,
+                "account": act,
+            }
+        return {
+            "success": False,
+            "msg": msg,
+            "token": None,
+            "account": None,
+        }

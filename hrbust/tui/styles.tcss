@@ -303,3 +303,37 @@ Button.primary {
     padding: 1 2;
     margin-top: 1;
 }
+
+/* ==================== 任务 C: 办事大厅扫码登录视图样式 ==================== */
+#qr-scroll-container {
+    height: 1fr;
+    background: #0b0f19;
+    padding: 1 2;
+}
+
+.qr-hint-title {
+    color: #facc15;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.qr-hint-sub {
+    color: #94a3b8;
+    margin-bottom: 1;
+}
+
+#qr-code-display {
+    color: #f8fafc;
+    background: #020617;
+    border: solid #1e293b;
+    padding: 1 2;
+    margin-bottom: 1;
+    width: auto;
+    height: auto;
+}
+
+#qr-status-display {
+    color: #38bdf8;
+    text-style: bold;
+    margin-top: 1;
+}

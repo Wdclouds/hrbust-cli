@@ -98,6 +98,7 @@ class HrbustTuiApp(App):
                             yield Label("• 📊 个人成绩大盘: 输入 [bold yellow]score[/bold yellow] 查看各科学分与加权平均 GPA", classes="guide-item")
                             yield Label("• 📢 教务公告新闻: 输入 [bold yellow]news[/bold yellow] 或 [bold yellow]notice[/bold yellow] 查看官方通告", classes="guide-item")
                             yield Label("• 📰 通告正文阅读: 输入 [bold yellow]read <文章ID>[/bold yellow] 或在列表中按 Enter", classes="guide-item")
+                            yield Label("• 📱 办事大厅扫码登录: 输入 [bold yellow]qr[/bold yellow] 微信/手机扫码秒登打通水控", classes="guide-item")
                             yield Label("• 🛡️ 账号凭据保险箱: 输入 [bold yellow]status[/bold yellow] / 输入 [bold yellow]logout[/bold yellow] 登出", classes="guide-item")
                             yield Label("• 🏠 返回本主页: 输入 [bold yellow]home[/bold yellow] 或按键盘 [bold yellow]Esc[/bold yellow] 键", classes="guide-item")
 
@@ -175,6 +176,19 @@ class HrbustTuiApp(App):
                             yield Label("", id="article-deck-meta")
                             yield Label("", id="article-deck-content")
                             yield Label("", id="article-deck-attachments")
+
+                    # 9. 网上办事大厅 / 水控移动端扫码登录视图
+                    with Vertical(id="qr-view", classes="view-panel"):
+                        with Horizontal(classes="view-header-bar"):
+                            yield Label("📱 [bold cyan]网上办事大厅 / 水控移动端扫码登录[/bold cyan]", classes="view-header-title")
+                            yield Button("🔄 重新生成二维码", id="btn-qr-refresh-deck")
+                            yield Button("🏠 返回主页 (Esc)", id="btn-back-home-8")
+                        with VerticalScroll(id="qr-scroll-container"):
+                            with Vertical(classes="panel-box"):
+                                yield Label("📱 请使用 [bold yellow]微信 / 哈理工移动端 / 今日校园[/bold yellow] 扫描下方二维码：", classes="qr-hint-title")
+                                yield Label("[dim]扫码后在手机端点击「确认登录」，系统将自动完成 CAS 认证并绑定水控凭据[/dim]", classes="qr-hint-sub")
+                                yield Label("", id="qr-code-display")
+                                yield Label("正在申请二维码...", id="qr-status-display")
 
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
@@ -254,7 +268,7 @@ class HrbustTuiApp(App):
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
-        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article"]
+        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr"]
         for v in views:
             widget = self.query_one(f"#{v}-view", Vertical)
             widget.display = (v == target)
@@ -377,9 +391,12 @@ class HrbustTuiApp(App):
                 self.notify("格式错误: read <文章ID> (如: read 5534)", title="参数不足", severity="warning")
             else:
                 self.action_open_article(args[0])
+        elif cmd in ("qr", "water-qr", "auth-qr", "scan"):
+            self.switch_to_view("qr")
+            self.action_start_qr_login_flow()
         elif cmd in ("help", "?"):
             self.action_show_home()
-            self.notify("指令: water | room 南一 | today | score | news | read <ID> | login <学号> <密码> | status | exit", title="命令帮助")
+            self.notify("指令: water | room 南一 | today | score | news | read <ID> | qr | login <学号> <密码> | status | exit", title="命令帮助")
         else:
             self.notify(f"未识别指令 '{cmd}'，请输入 help 查看可用命令", title="命令提示", severity="warning")
 
@@ -757,7 +774,78 @@ class HrbustTuiApp(App):
         else:
             att_lbl.update("[dim]（本文无附加下载文件）[/dim]")
 
-    # ==================== 按钮与事件路由 ====================\n
+    # ==================== 任务 C: 办事大厅扫码登录 Workers ====================
+
+    @work(thread=True)
+    def action_start_qr_login_flow(self) -> None:
+        """后台拉取办事大厅二维码并在终端渲染，启动异步轮询"""
+        self.notify("正在申请网上办事大厅登录二维码...", title="扫码登录")
+        def _set_loading():
+            self.query_one("#qr-code-display", Label).update("⏳ 正在获取二维码...")
+            self.query_one("#qr-status-display", Label).update("[cyan]正在连接认证中心...[/cyan]")
+        self.call_from_thread(_set_loading)
+
+        try:
+            session = self.water_svc.start_qr_login()
+            uuid = session["uuid"]
+            qr_ascii = session["qr_ascii"]
+
+            def _show_qr():
+                self.query_one("#qr-code-display", Label).update(qr_ascii)
+                self.query_one("#qr-status-display", Label).update("[yellow]📱 等待手机扫码中 (微信/今日校园/哈理工移动端)...[/yellow]")
+            self.call_from_thread(_show_qr)
+        except Exception as e:
+            def _show_err():
+                self.query_one("#qr-code-display", Label).update("❌ 二维码加载失败")
+                self.query_one("#qr-status-display", Label).update(f"[red]获取失败: {e}[/red]")
+            self.call_from_thread(_show_err)
+            self.notify(f"获取二维码失败: {e}", severity="error")
+            return
+
+        import time
+        start_t = time.time()
+        while time.time() - start_t < 120:
+            if self.active_view != "qr":
+                return
+            try:
+                st = self.water_svc.check_qr_status(uuid)
+                if st == "2":
+                    def _update_scanned():
+                        self.query_one("#qr-status-display", Label).update("[bold yellow]📱 手机已扫描！请在手机上点击「确认登录」...[/bold yellow]")
+                    self.call_from_thread(_update_scanned)
+                elif st == "1":
+                    def _update_finishing():
+                        self.query_one("#qr-status-display", Label).update("[bold green]✔ 手机端已确认授权！正在换取一卡通与水控凭据...[/bold green]")
+                    self.call_from_thread(_update_finishing)
+                    res = self.water_svc.finish_qr_login(uuid)
+                    if res.get("success"):
+                        def _update_success():
+                            acc = res.get("account", "")
+                            self.query_one("#qr-status-display", Label).update(f"[bold green]🎉 扫码登录成功！已绑定一卡通卡号: {acc}[/bold green]")
+                            self._update_status_bar()
+                        self.call_from_thread(_update_success)
+                        self.notify("🎉 扫码登录成功！水控凭据已自动同步，随时输入 water 秒约！", title="扫码登录成功", severity="information")
+                    else:
+                        def _update_fail():
+                            err = res.get("msg", "未知错误")
+                        self.query_one("#qr-status-display", Label).update(f"[red]换票失败: {err}[/red]")
+                        self.call_from_thread(_update_fail)
+                    return
+                elif st == "3":
+                    def _update_expired():
+                        self.query_one("#qr-status-display", Label).update("[red]二维码已失效，请点击上方「重新生成二维码」重试[/red]")
+                    self.call_from_thread(_update_expired)
+                    return
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+        def _update_timeout():
+            self.query_one("#qr-status-display", Label).update("[yellow]扫码已超时，请点击上方「重新生成二维码」刷新[/yellow]")
+        self.call_from_thread(_update_timeout)
+
+    # ==================== 按钮与事件路由 ====================
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
         if btn_id == "btn-sidebar-refresh":
@@ -771,6 +859,7 @@ class HrbustTuiApp(App):
             "btn-back-home-5",
             "btn-back-home-6",
             "btn-back-home-7",
+            "btn-back-home-8",
         ):
             self.action_show_home()
         elif btn_id == "btn-water-refresh-deck":
@@ -785,6 +874,8 @@ class HrbustTuiApp(App):
             self.action_fetch_score_data()
         elif btn_id == "btn-article-back-news":
             self.switch_to_view("news")
+        elif btn_id == "btn-qr-refresh-deck":
+            self.action_start_qr_login_flow()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "table-water-deck":

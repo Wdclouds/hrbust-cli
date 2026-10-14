@@ -350,6 +350,56 @@ def score(
         f"加权 GPA: [bold yellow on black] {summary.get('gpa')} [/bold yellow on black]"
     )
 
+# ==================== 9. 办事大厅与水控扫码登录 (qr) ====================
+@app.command(name="qr")
+def qr_login():
+    """免输密码：展示网上办事大厅 / 统一身份认证字符二维码，手机扫码秒登"""
+    _ensure_network()
+    from ..services.water_svc import WaterService
+    import time
+    svc = WaterService()
+
+    with console.status("[cyan]正在申请网上办事大厅二维码会话...[/cyan]"):
+        try:
+            session = svc.start_qr_login()
+        except Exception as e:
+            console.print(f"[bold red][错误] 获取二维码失败: {e}[/bold red]")
+            raise typer.Exit(code=1)
+
+    uuid = session["uuid"]
+    qr_ascii = session["qr_ascii"]
+
+    console.print(Panel(
+        f"[bold white]{qr_ascii}[/bold white]",
+        title="[bold yellow]📱 网上办事大厅 / 水控移动端扫码登录[/bold yellow]",
+        subtitle="微信 / 今日校园 / 哈理工移动端扫码",
+        border_style="cyan"
+    ))
+    console.print("[dim]提示: 请在手机端扫描上方二维码并点击「确认登录」 (超时时间 120 秒)[/dim]\n")
+
+    start_t = time.time()
+    with console.status("[cyan]等待手机扫码中...[/cyan]") as st:
+        while time.time() - start_t < 120:
+            status = svc.check_qr_status(uuid)
+            if status == "2":
+                st.update("[yellow]已扫码！请在手机上点击「确认登录」...[/yellow]")
+            elif status == "1":
+                st.update("[green]手机端已确认授权！正在自动换取水控凭据并加密落盘...[/green]")
+                res = svc.finish_qr_login(uuid)
+                if res.get("success"):
+                    console.print(f"\n[bold green]✅ 扫码单点登录成功！一卡通账号: {res.get('account')}[/bold green]")
+                    console.print("[green]水控业务凭据已自动同步至本地安全保险箱。现在可直接执行 hrbust water 或打开 TUI 秒约洗澡！[/green]")
+                    return
+                else:
+                    console.print(f"\n[bold red][错误] 换票失败: {res.get('msg')}[/bold red]")
+                    raise typer.Exit(code=1)
+            elif status == "3":
+                console.print("\n[bold red]二维码已超时失效，请重新运行 hrbust qr 获取新码。[/bold red]")
+                raise typer.Exit(code=1)
+            time.sleep(1.5)
+
+    console.print("\n[yellow]扫码超时，请重新运行 hrbust qr。[/yellow]")
+
 @app.command(name="tui")
 def tui():
     """启动 HRBUST 全屏交互式终端中枢大盘 (TUI)"""
