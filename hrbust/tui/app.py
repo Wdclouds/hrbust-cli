@@ -251,10 +251,10 @@ class HrbustTuiApp(App):
             container.mount(Label("[dim]今日暂无最新公告发布[/dim]"))
             return
 
-        for item in items[:12]:
+        for item in items[:15]:
             card = Vertical(
                 Label(f"[{item.get('type', '通告')}] · {item.get('date', '今日')}", classes="news-date"),
-                Label(item.get("title", ""), classes="news-title"),
+                Label(f"• {item.get('title', '')}", classes="news-title"),
                 classes="news-card",
             )
             container.mount(card)

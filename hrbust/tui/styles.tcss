@@ -1,4 +1,4 @@
-/* HRBUST TUI 现代暗黑极客命令中枢主题样式表 */
+/* HRBUST TUI 现代暗黑极客命令中枢主题样式表 - 极简扁平去框线设计 */
 
 Screen {
     background: #0b0f19;
@@ -20,10 +20,11 @@ Footer {
     dock: bottom;
 }
 
-/* 顶部状态通知条 */
+/* 顶部状态通知条: 仅保留底部分隔单线 */
 .top-status-bar {
     height: 3;
     background: #0f172a;
+    border: none;
     border-bottom: solid #1e293b;
     padding: 0 1;
     align: left middle;
@@ -40,11 +41,11 @@ Footer {
     height: 1fr;
 }
 
-/* 左侧 3/4 主命令甲板 */
+/* 左侧 3/4 主命令甲板: 无外包围框，全靠内部分区 */
 #main-deck {
     width: 75%;
     height: 1fr;
-    padding: 1 2;
+    padding: 1 2 0 2;
     background: #0b0f19;
 }
 
@@ -71,34 +72,29 @@ Footer {
 .hero-subtitle {
     color: #94a3b8;
     text-align: center;
-    margin-bottom: 2;
+    margin-bottom: 1;
 }
 
+/* 快捷指引面板: 取消四面封闭硬框，改用左侧青色提示线与沉浸深色底 */
 .quick-guide-panel {
-    background: #111827;
-    border: solid #1e293b;
+    background: #0f172a;
+    border: none;
+    border-left: wide #0284c7;
     padding: 1 2;
-    width: 80%;
+    width: 85%;
     align: center middle;
 }
 
 .guide-title {
     color: #38bdf8;
     text-style: bold;
-    text-align: center;
+    text-align: left;
     margin-bottom: 1;
 }
 
 .guide-item {
     color: #cbd5e1;
-    margin-bottom: 1;
-}
-
-.guide-cmd {
-    color: #facc15;
-    text-style: bold;
-    background: #000000;
-    padding: 0 1;
+    margin-bottom: 0;
 }
 
 /* 各业务视图卡片 */
@@ -111,6 +107,9 @@ Footer {
     height: 3;
     align: left middle;
     margin-bottom: 1;
+    border: none;
+    border-bottom: solid #1e293b;
+    padding-bottom: 0;
 }
 
 .view-header-title {
@@ -118,19 +117,20 @@ Footer {
     text-style: bold;
 }
 
-/* 最下方常驻命令输入条 */
+/* 最下方常驻命令输入条: 取消四周围框，仅保留顶部分隔单线 */
 #command-container {
     height: 3;
-    margin-top: 1;
-    background: #111827;
-    border: solid #0284c7;
+    margin-top: 0;
+    background: #0f172a;
+    border: none;
+    border-top: solid #1e293b;
     padding: 0 1;
     align: left middle;
 }
 
 #command-prompt-symbol {
     width: 3;
-    color: #0ea5e9;
+    color: #38bdf8;
     text-style: bold;
 }
 
@@ -146,17 +146,19 @@ Footer {
     border: none;
 }
 
-/* 右侧 1/4 学校公告栏 */
+/* 右侧 1/4 学校公告栏: 仅保留左侧一根区域垂直分割线，内部彻底去框 */
 #news-sidebar {
     width: 25%;
     height: 1fr;
-    background: #0f172a;
+    background: #0b0f19;
+    border: none;
     border-left: solid #1e293b;
-    padding: 1;
+    padding: 1 1 0 1;
 }
 
 .sidebar-header {
     height: 3;
+    border: none;
     border-bottom: solid #1e293b;
     align: left middle;
     margin-bottom: 1;
@@ -171,11 +173,13 @@ Footer {
     height: 1fr;
 }
 
+/* 彻底取消新闻卡片的四周实线框 (不再有空心黑框)，改用极简紧凑无框信息流 */
 .news-card {
     height: auto;
-    background: #111827;
-    border: solid #1e293b;
-    padding: 0 1;
+    background: transparent;
+    border: none;
+    border-bottom: dashed #1e293b;
+    padding: 0 0 1 0;
     margin-bottom: 1;
 }
 
@@ -185,29 +189,31 @@ Footer {
 }
 
 .news-card:hover {
-    border: solid #38bdf8;
-    background: #1e293b;
+    background: #0f172a;
+    border: none;
+    border-bottom: solid #38bdf8;
 }
 
 .news-date {
     color: #f59e0b;
     text-style: bold;
-    margin-bottom: 1;
+    margin-bottom: 0;
 }
 
 .news-title {
-    color: #f1f5f9;
+    color: #e2e8f0;
 }
 
-/* 表格与结果面板 */
+/* 表格与结果面板: 融入深色背景，取消外围大粗框，仅保留顶线 */
 DataTable {
-    background: #111827;
-    border: solid #1e293b;
+    background: #0b0f19;
+    border: none;
+    border-top: solid #1e293b;
     height: 1fr;
 }
 
 DataTable > .datatable--header {
-    background: #1e293b;
+    background: #0f172a;
     color: #38bdf8;
     text-style: bold;
 }
@@ -223,7 +229,7 @@ Button {
     color: #f1f5f9;
     border: none;
     height: 3;
-    min-width: 12;
+    min-width: 10;
     margin-right: 1;
 }
 
@@ -238,19 +244,23 @@ Button.primary {
     text-style: bold;
 }
 
+/* 出码凭证卡片: 取消四周围框，改为左侧绿色高亮强调线 */
 .voucher-card {
-    background: #1e293b;
-    border: solid #10b981;
-    padding: 1 2;
+    background: #0f172a;
+    border: none;
+    border-left: wide #10b981;
+    padding: 0 1;
     margin-top: 1;
-    height: 4;
-    align: center middle;
+    height: 3;
+    align: left middle;
 }
 
+/* 凭据面板卡片: 取消硬线方框，改为左侧青色提示线 */
 .panel-box {
     height: auto;
-    background: #111827;
-    border: solid #1e293b;
+    background: #0f172a;
+    border: none;
+    border-left: wide #38bdf8;
     padding: 0 1;
     margin-bottom: 1;
 }
