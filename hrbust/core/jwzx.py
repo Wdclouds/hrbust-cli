@@ -73,7 +73,11 @@ class JwzxEngine:
         return res.url
 
     def get_page(self, url: str, params: dict = None) -> BeautifulSoup:
-        """拉取页面并解析为 BeautifulSoup (自动 GBK 容错解码)"""
+        """拉取页面并解析为 BeautifulSoup (自动智能识别 UTF-8 / GBK 编码)"""
         res = self.session.get(url, params=params, timeout=8)
-        text = res.content.decode("gbk", errors="ignore")
+        raw = res.content
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("gbk", errors="ignore")
         return BeautifulSoup(text, "html.parser")

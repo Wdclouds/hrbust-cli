@@ -431,3 +431,26 @@ def test_plan_service_parsing_and_statistics():
     assert len(res_elective["courses"]) == 1
     assert res_elective["courses"][0]["course_name"] == "Python数据分析"
 
+@pytest.mark.asyncio
+async def test_astrbot_plugin_message_routing(monkeypatch):
+    from unittest.mock import MagicMock
+    from hrbust.integrations.astrbot_plugin.main import AstrBotHrbustPlugin
+
+    plugin = AstrBotHrbustPlugin()
+
+    # 1. 测试空指令
+    res_none = await plugin.on_user_message("   ")
+    assert res_none is None
+
+    # 2. 测试今日教务动态触发
+    mock_news_svc = MagicMock()
+    mock_news_svc.return_value.get_daily_brief.return_value = [
+        {"type": "教务公告", "date": "2026-10-14", "title": "期中教学检查工作通告"}
+    ]
+    monkeypatch.setattr("hrbust.services.news_svc.NewsService", mock_news_svc)
+
+    reply_news = await plugin.on_user_message("今日教务")
+    assert reply_news is not None
+    assert "哈理工今日教务与新闻" in reply_news
+    assert "期中教学检查工作通告" in reply_news
+
