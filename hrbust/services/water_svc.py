@@ -66,14 +66,16 @@ class WaterService:
             }
         }
 
-    def auto_auth_and_sync(self, username: str, password: str) -> Dict[str, Any]:
+    def login_by_password(self, username: str, password: str) -> Dict[str, Any]:
         """
-        通过 CAS 统一身份认证全自动换取水控 Token 并自动加密落盘
+        网上办事大厅 / 统一身份认证 (CAS) 账号密码登录
+        通过哈理工统一身份认证中心验明身份并自动换取一卡通/水控 Token
         """
         success, msg, token, account = self.engine.fetch_token_by_cas(username, password)
         if success and token:
-            from ..core.auth import set_water_token
+            from ..core.auth import set_water_token, set_cas_credentials
             act = account or username
+            set_cas_credentials(username, password)
             raw_info = self.engine.aes_encrypt(act, act)
             set_water_token(raw_info, token)
             return {
@@ -88,6 +90,9 @@ class WaterService:
             "token": None,
             "account": None,
         }
+
+    # 兼容历史别名
+    auto_auth_and_sync = login_by_password
 
     def start_qr_login(self) -> Dict[str, Any]:
         """

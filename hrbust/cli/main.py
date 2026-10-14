@@ -63,22 +63,19 @@ def water():
 
     raw_info, token = get_water_token()
     if not token:
-        # 方案 1: 如果已配置学号与密码，优先尝试 CAS 全自动静默换票 (零抓包)
-        if username and password:
-            with console.status("[cyan]正在通过学校统一身份认证 (CAS) 全自动激活水控凭据...[/cyan]"):
-                auto_res = svc.auto_auth_and_sync(username, password)
-            if auto_res.get("success"):
-                console.print("[bold green]✔ 已通过统一身份认证中心全自动激活水控！(免抓包)[/bold green]")
-                raw_info, token = get_water_token()
-            else:
-                console.print(f"[dim]自动激活未完成 ({auto_res.get('msg')})，转入手动模式[/dim]")
-
-    if not token:
-        token = Prompt.ask("[bold yellow]请输入控水系统 Token[/bold yellow]")
-        set_water_token(token)
+        console.print(Panel(
+            "[bold yellow]未检测到网上办事大厅认证凭据！[/bold yellow]\n\n"
+            "生活水控与一卡通隶属于学校【网上办事大厅 / 统一身份认证 (CAS)】，与老教务网为两个独立系统。\n"
+            "请执行 [bold cyan]hrbust auth[/bold cyan] 进入办事大厅官方认证中心（支持移动端扫码或统一认证密码）。",
+            title="需要办事大厅认证",
+            border_style="yellow"
+        ))
+        raise typer.Exit(code=1)
 
     if not username:
-        username = Prompt.ask("请输入学号")
+        from ..core.auth import get_cas_credentials
+        cas_u, _ = get_cas_credentials()
+        username = cas_u or Prompt.ask("请输入学号")
 
     with console.status("[cyan]正在获取浴场实时空闲大盘...[/cyan]"):
         try:
@@ -521,16 +518,10 @@ def plan(
         f"修读完成率: [bold yellow on black] {summary.get('completion_rate')}% [/bold yellow on black]"
     )
 
-# ==================== 9. 办事大厅与水控扫码登录 (qr) ====================
-@app.command(name="qr")
-def qr_login():
-    """免输密码：展示网上办事大厅 / 统一身份认证字符二维码，手机扫码秒登"""
-    _ensure_network()
-    from ..services.water_svc import WaterService
+# ==================== 9. 网上办事大厅与统一身份认证中心 (auth / qr) ====================
+def _run_qr_flow(svc):
     import time
-    svc = WaterService()
-
-    with console.status("[cyan]正在申请网上办事大厅二维码会话...[/cyan]"):
+    with console.status("[cyan]正在申请网上办事大厅官方二维码会话...[/cyan]"):
         try:
             session = svc.start_qr_login()
         except Exception as e:
@@ -542,7 +533,7 @@ def qr_login():
 
     console.print(Panel(
         f"[bold white]{qr_ascii}[/bold white]",
-        title="[bold yellow]📱 网上办事大厅 / 水控移动端扫码登录[/bold yellow]",
+        title="[bold yellow]📱 官方选项一：移动端扫码登录[/bold yellow]",
         subtitle="微信 / 今日校园 / 哈理工移动端扫码",
         border_style="cyan"
     ))
@@ -559,17 +550,78 @@ def qr_login():
                 res = svc.finish_qr_login(uuid)
                 if res.get("success"):
                     console.print(f"\n[bold green]✅ 扫码单点登录成功！一卡通账号: {res.get('account')}[/bold green]")
-                    console.print("[green]水控业务凭据已自动同步至本地安全保险箱。现在可直接执行 hrbust water 或打开 TUI 秒约洗澡！[/green]")
+                    console.print("[green]网上办事大厅凭据已就绪，现在可直接执行 hrbust water 或 hrbust card！[/green]")
                     return
                 else:
                     console.print(f"\n[bold red][错误] 换票失败: {res.get('msg')}[/bold red]")
                     raise typer.Exit(code=1)
             elif status == "3":
-                console.print("\n[bold red]二维码已超时失效，请重新运行 hrbust qr 获取新码。[/bold red]")
+                console.print("\n[bold red]二维码已超时失效，请重新运行 hrbust auth --qr 获取新码。[/bold red]")
                 raise typer.Exit(code=1)
             time.sleep(1.5)
 
-    console.print("\n[yellow]扫码超时，请重新运行 hrbust qr。[/yellow]")
+    console.print("\n[yellow]扫码超时，请重新运行 hrbust auth --qr。[/yellow]")
+
+@app.command(name="auth")
+def auth_cmd(
+    qr: bool = typer.Option(False, "--qr", help="直接进入移动端扫码登录通道"),
+    user: str = typer.Option(None, "--user", "-u", help="学号"),
+    password: str = typer.Option(None, "--pass", "-p", help="哈理工统一身份认证密码")
+):
+    """网上办事大厅 / 统一身份认证 (CAS) 官方认证中心 (水控与一卡通专属通道)"""
+    _ensure_network()
+    from ..services.water_svc import WaterService
+    svc = WaterService()
+
+    # 1. 指定账密
+    if user and password:
+        with console.status("[cyan]正在提交统一身份认证中心 (CAS) 验明身份...[/cyan]"):
+            res = svc.login_by_password(user, password)
+        if res.get("success"):
+            console.print(f"[bold green]✅ 网上办事大厅登录成功！已绑定一卡通卡号: {res.get('account')}[/bold green]")
+            return
+        else:
+            console.print(f"[bold red]❌ 统一认证失败: {res.get('msg')}[/bold red]")
+            raise typer.Exit(code=1)
+
+    # 2. 指定扫码
+    if qr:
+        _run_qr_flow(svc)
+        return
+
+    # 3. 默认交互式双通道投射
+    console.print(Panel(
+        "[bold cyan]哈理工网上办事大厅 / 统一身份认证中心 (CAS)[/bold cyan]\n"
+        "[dim]生活水控与一卡通服务隶属于网上办事大厅，与教务在线为两个独立系统[/dim]\n\n"
+        "  [1] 📱 官方选项一：移动端扫码登录 (微信 / 今日校园 / 哈理工移动端)\n"
+        "  [2] 🔑 官方选项二：办事大厅账号密码登录 (输入哈理工统一身份认证密码)\n"
+        "  [0] 取消退出",
+        title="办事大厅官方登录通道",
+        border_style="cyan"
+    ))
+    choice = Prompt.ask("请选择登录通道 [1/2]", default="1")
+    if choice == "1":
+        _run_qr_flow(svc)
+    elif choice == "2":
+        u = Prompt.ask("请输入学号")
+        p = Prompt.ask("请输入哈理工统一身份认证密码", password=True)
+        with console.status("[cyan]正在提交统一身份认证中心 (CAS) 验明身份...[/cyan]"):
+            res = svc.login_by_password(u, p)
+        if res.get("success"):
+            console.print(f"[bold green]✅ 网上办事大厅登录成功！已绑定一卡通卡号: {res.get('account')}[/bold green]")
+        else:
+            console.print(f"[bold red]❌ 统一认证失败: {res.get('msg')}[/bold red]")
+            raise typer.Exit(code=1)
+    else:
+        console.print("[cyan]已退出。[/cyan]")
+
+@app.command(name="qr")
+def qr_alias():
+    """快捷指令：直接唤起网上办事大厅移动端扫码登录"""
+    _ensure_network()
+    from ..services.water_svc import WaterService
+    svc = WaterService()
+    _run_qr_flow(svc)
 
 @app.command(name="tui")
 def tui():
@@ -586,29 +638,28 @@ def logout():
 
 @app.command("status")
 def status():
-    """检查当前系统登录态与安全凭据存储状态"""
-    from ..core.auth import get_credentials, get_water_token
+    """检查当前教务系统与网上办事大厅安全凭据状态"""
+    from ..core.auth import get_credentials, get_cas_credentials, get_water_token
     u, p = get_credentials()
+    cas_u, cas_p = get_cas_credentials()
     w_info, w_tok = get_water_token()
     
-    table = Table(title="HRBUST 凭据与安全状态", box=box.SIMPLE)
-    table.add_column("检测项目", style="cyan")
-    table.add_column("状态", style="bold")
+    table = Table(title="HRBUST 凭据与系统独立认证状态", box=box.SIMPLE)
+    table.add_column("认证系统", style="cyan")
+    table.add_column("当前状态", style="bold")
+    table.add_column("说明", style="dim")
     
-    table.add_row("教务账号", u if u else "[dim]未配置[/dim]")
-    table.add_row("教务密码", "******" if p else "[dim]未配置[/dim]")
+    jwzx_status = f"[green]已绑定 ({u})[/green]" if u and p else "[yellow]未配置 (敲 hrbust login 登录)[/yellow]"
+    table.add_row("1. 教务在线 (JWZX)", jwzx_status, "课表、成绩单、考试安排、空教室、培养方案")
 
-    if w_info and w_tok:
-        water_desc = "[green]已就绪 (通过统一身份认证全自动激活)[/green]"
-    elif u and p:
-        water_desc = "[yellow]已关联学号 (敲 hrbust water 将全自动激活，免抓包)[/yellow]"
-    else:
-        water_desc = "[dim]未配置 (配置学号密码后将全自动打通)[/dim]"
+    ehall_status = f"[green]已认证 ({cas_u or '扫码完成'})[/green]" if w_tok else "[yellow]未认证 (敲 hrbust auth 登录)[/yellow]"
+    table.add_row("2. 网上办事大厅 (CAS)", ehall_status, "生活水控预约、洗澡大盘、一卡通消费账单")
 
-    table.add_row("水控凭据", water_desc)
-    table.add_row("底层存储", "机器特征绑定 AES-256-GCM 密文保险箱 (0600)")
+    water_status = "[green]Token 活跃有效[/green]" if w_tok else "[dim]未生成[/dim]"
+    table.add_row("3. 水控与一卡通业务", water_status, "独立加密存储于机器特征 AES 保险箱")
+
     console.print(table)
-    console.print("[dim]💡 提示: 水控系统已接入学校统一身份认证 (CAS)。直接敲 hrbust water 即可全自动激活出码，无需手动抓包。[/dim]")
+    console.print("[dim]💡 提示: 教务在线与网上办事大厅密码相互独立。教务网请用 hrbust login，办事大厅请用 hrbust auth。[/dim]")
 
 def run():
     if len(sys.argv) == 1:

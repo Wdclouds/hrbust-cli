@@ -26,6 +26,8 @@ from ..core.network import check_campus_network
 from ..core.auth import (
     get_credentials,
     set_credentials,
+    get_cas_credentials,
+    set_cas_credentials,
     get_water_token,
     set_water_token,
     clear_all_credentials,
@@ -103,7 +105,7 @@ class HrbustTuiApp(App):
                             yield Label("• 🎯 培养方案学分审查: 输入 [bold yellow]plan[/bold yellow] 查看已修/尚欠学分与毕业进度", classes="guide-item")
                             yield Label("• 📢 教务公告新闻: 输入 [bold yellow]news[/bold yellow] 或 [bold yellow]notice[/bold yellow] 查看官方通告", classes="guide-item")
                             yield Label("• 📰 通告正文阅读: 输入 [bold yellow]read <文章ID>[/bold yellow] 或在列表中按 Enter", classes="guide-item")
-                            yield Label("• 📱 办事大厅扫码登录: 输入 [bold yellow]qr[/bold yellow] 微信/手机扫码秒登打通水控", classes="guide-item")
+                            yield Label("• 🏛️ 办事大厅认证中心: 输入 [bold yellow]auth[/bold yellow] 官方扫码或账号密码打通水控与账单", classes="guide-item")
                             yield Label("• 🛡️ 账号凭据保险箱: 输入 [bold yellow]status[/bold yellow] / 输入 [bold yellow]logout[/bold yellow] 登出", classes="guide-item")
                             yield Label("• 🏠 返回本主页: 输入 [bold yellow]home[/bold yellow] 或按键盘 [bold yellow]Esc[/bold yellow] 键", classes="guide-item")
 
@@ -144,20 +146,19 @@ class HrbustTuiApp(App):
                     # 6. 安全状态与保险箱视图
                     with Vertical(id="status-view", classes="view-panel"):
                         with Horizontal(classes="view-header-bar"):
-                            yield Label("🛡️ [bold cyan]HRBUST 凭据与安全保险箱[/bold cyan]", classes="view-header-title")
+                            yield Label("🛡️ [bold cyan]HRBUST 凭据与系统独立认证状态[/bold cyan]", classes="view-header-title")
                             yield Button("🏠 返回主页 (Esc)", id="btn-back-home-5")
                         with VerticalScroll():
                             with Vertical(classes="panel-box"):
-                                yield Label("🔑 [bold cyan]教务在线 (JWZX) 凭据[/bold cyan]")
-                                yield Label("当前绑定学号: [dim]探测中...[/dim]", id="status-deck-user")
+                                yield Label("🔑 [bold cyan]1. 教务在线 (JWZX) 凭据[/bold cyan]")
+                                yield Label("当前绑定学号: [dim]未配置[/dim]", id="status-deck-user")
                             with Vertical(classes="panel-box"):
-                                yield Label("💧 [bold cyan]一卡通水控凭据 (方案 1 零抓包)[/bold cyan]")
-                                yield Label("水控凭据状态: [dim]探测中...[/dim]", id="status-deck-water")
+                                yield Label("🏛️ [bold cyan]2. 网上办事大厅 / 统一身份认证 (CAS)[/bold cyan]")
+                                yield Label("办事大厅凭据状态: [dim]未认证[/dim]", id="status-deck-water")
                             with Vertical(classes="panel-box"):
-                                yield Label("💡 [bold yellow]全栈凭据配置指引[/bold yellow]")
-                                yield Label("• 全栈一键绑定: 底部输入 [bold cyan]login <学号> <密码>[/bold cyan] (自动同时打通教务与水控，免抓包)")
-                                yield Label("• 水控秒约出码: 绑定学号后输入 [bold cyan]water[/bold cyan] 全自动激活大盘并出码")
-                                yield Label("• 水控手动兜底: 底部输入 [bold cyan]token <Token串>[/bold cyan] (可选，仅在 CAS 异常时手动填)")
+                                yield Label("💡 [bold yellow]独立认证指引[/bold yellow]")
+                                yield Label("• 教务在线登录: 底部输入 [bold cyan]login <学号> <教务网密码>[/bold cyan] (查课表、成绩单、考试、自习室、培养方案)")
+                                yield Label("• 办事大厅认证: 底部输入 [bold cyan]auth[/bold cyan] (进入专属认证中心，支持官方扫码或统一认证密码)")
                                 yield Label("• 彻底清空销毁: 底部输入 [bold cyan]logout[/bold cyan] (一键销毁本地密文保险箱)")
 
                     # 7. 个人全科成绩与 GPA 大盘视图
@@ -182,18 +183,32 @@ class HrbustTuiApp(App):
                             yield Label("", id="article-deck-content")
                             yield Label("", id="article-deck-attachments")
 
-                    # 9. 网上办事大厅 / 水控移动端扫码登录视图
-                    with Vertical(id="qr-view", classes="view-panel"):
+                    # 9. 网上办事大厅 / 统一身份认证中心 (E-Hall Portal)
+                    with Vertical(id="auth-view", classes="view-panel"):
                         with Horizontal(classes="view-header-bar"):
-                            yield Label("📱 [bold cyan]网上办事大厅 / 水控移动端扫码登录[/bold cyan]", classes="view-header-title")
-                            yield Button("🔄 重新生成二维码", id="btn-qr-refresh-deck")
+                            yield Label("🏛️ [bold cyan]哈理工网上办事大厅 / 统一身份认证中心 (E-Hall Portal)[/bold cyan]", classes="view-header-title")
                             yield Button("🏠 返回主页 (Esc)", id="btn-back-home-8")
-                        with VerticalScroll(id="qr-scroll-container"):
-                            with Vertical(classes="panel-box"):
-                                yield Label("📱 请使用 [bold yellow]微信 / 哈理工移动端 / 今日校园[/bold yellow] 扫描下方二维码：", classes="qr-hint-title")
-                                yield Label("[dim]扫码后在手机端点击「确认登录」，系统将自动完成 CAS 认证并绑定水控凭据[/dim]", classes="qr-hint-sub")
-                                yield Label("", id="qr-code-display")
-                                yield Label("正在申请二维码...", id="qr-status-display")
+                        with VerticalScroll(id="auth-scroll-container"):
+                            yield Label("生活水控与一卡通服务隶属于网上办事大厅，与老教务网密码独立物理隔离", classes="auth-header-desc")
+                            with Horizontal(id="auth-deck-split"):
+                                # 官方选项一: 移动端扫码登录
+                                with Vertical(classes="auth-card", id="auth-qr-card"):
+                                    yield Label("📱 [bold yellow]官方选项一：移动端扫码登录[/bold yellow]", classes="auth-card-title")
+                                    yield Label("[dim]使用微信 / 今日校园 / 哈理工移动端 扫描屏幕二维码[/dim]", classes="auth-card-sub")
+                                    yield Label("", id="qr-code-display")
+                                    yield Label("正在申请二维码...", id="qr-status-display")
+                                    yield Button("🔄 重新生成二维码", id="btn-qr-refresh-deck")
+
+                                # 官方选项二: 办事大厅统一认证密码登录
+                                with Vertical(classes="auth-card", id="auth-pwd-card"):
+                                    yield Label("🔑 [bold yellow]官方选项二：统一认证密码登录[/bold yellow]", classes="auth-card-title")
+                                    yield Label("[dim]请输入哈理工全校统一身份认证密码 (与教务网密码相互独立)[/dim]", classes="auth-card-sub")
+                                    yield Label("学号 (Account):")
+                                    yield Input(placeholder="请输入学号 (如 2306010309)...", id="input-cas-user")
+                                    yield Label("统一身份认证密码 (Password):")
+                                    yield Input(placeholder="请输入办事大厅统一密码...", password=True, id="input-cas-pass")
+                                    yield Button("🔑 提交统一身份认证", id="btn-cas-submit-deck", classes="primary")
+                                    yield Label("", id="label-cas-submit-status")
 
                     # 10. 期末/期中考试安排与考场座位号大盘视图
                     with Vertical(id="exam-view", classes="view-panel"):
@@ -289,25 +304,23 @@ class HrbustTuiApp(App):
         """刷新顶部状态指示条"""
         try:
             u, p = get_credentials()
+            cas_u, _ = get_cas_credentials()
             _, w_tok = get_water_token()
             is_campus = check_campus_network()
             net_text = "🟢 [bold green]已直连校园网[/bold green]" if is_campus else "🟡 [bold yellow]外部网络/代理[/bold yellow]"
             self.query_one("#net-status-label", Static).update(f"🌐 [bold]校园网:[/bold] {net_text}")
 
-            user_text = f"[bold green]{u}[/bold green]" if u else "[dim]未绑定[/dim]"
-            self.query_one("#user-status-label", Static).update(f"  |  👤 [bold]学号:[/bold] {user_text}")
+            user_text = f"[bold green]{u}[/bold green]" if u else "[dim]未配置[/dim]"
+            self.query_one("#user-status-label", Static).update(f"  |  👤 [bold]教务网:[/bold] {user_text}")
 
             if w_tok:
-                water_status_text = "[bold green]已就绪[/bold green]"
-                water_deck_desc = "水控凭据状态: [bold green]已就绪 (通过统一身份认证已全自动激活)[/bold green]"
-            elif u and p:
-                water_status_text = "[bold yellow]待激活[/bold yellow]"
-                water_deck_desc = "水控凭据状态: [bold yellow]已关联学号 (切入 water 视图将全自动激活出码，免抓包)[/bold yellow]"
+                water_status_text = f"[bold green]已认证 ({cas_u or '扫码'})[/bold green]"
+                water_deck_desc = f"办事大厅状态: [bold green]已认证 ({cas_u or '扫码完成'}) | 水控与账单已就绪[/bold green]"
             else:
-                water_status_text = "[dim]未配置[/dim]"
-                water_deck_desc = "水控凭据状态: [dim]未配置 (在底栏输入 login 绑定学号后全自动激活)[/dim]"
+                water_status_text = "[dim]未认证[/dim]"
+                water_deck_desc = "办事大厅状态: [yellow]未认证 (在底栏输入 auth 进入独立认证中心)[/yellow]"
 
-            self.query_one("#water-status-label", Static).update(f"  |  💧 [bold]水控凭据:[/bold] {water_status_text}")
+            self.query_one("#water-status-label", Static).update(f"  |  🏛️ [bold]办事大厅:[/bold] {water_status_text}")
             self.query_one("#status-deck-user", Label).update(f"当前绑定学号: {user_text}")
             self.query_one("#status-deck-water", Label).update(water_deck_desc)
         except Exception:
@@ -315,7 +328,7 @@ class HrbustTuiApp(App):
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
-        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "qr", "exam", "card", "plan"]
+        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article", "auth", "exam", "card", "plan"]
         for v in views:
             widget = self.query_one(f"#{v}-view", Vertical)
             widget.display = (v == target)
@@ -405,31 +418,23 @@ class HrbustTuiApp(App):
                 self.notify(f"学号 {u} 凭据已保存，正在后台尝试登录...", title="账号配置", severity="information")
                 self.switch_to_view("status")
                 self.action_test_jwzx_login(u, p)
-        elif cmd in ("token", "water-token"):
-            if not args:
-                self.notify("格式错误: token <水控Token>", title="参数不足", severity="warning")
-                self.switch_to_view("status")
-            else:
-                tok = args[0]
-                raw_info, _ = get_water_token()
-                set_water_token(raw_info or "", tok)
-                self._update_status_bar()
-                self.notify("水控 Token 已更新！输入 water 可测试拉取大盘", title="凭据保存", severity="information")
-                self.switch_to_view("water")
-                self.action_fetch_water_data()
         elif cmd == "logout":
             clear_all_credentials()
             self.jwzx_engine = None
             self._update_status_bar()
             self.notify("已成功登出并清空所有本地密文凭据", title="安全登出", severity="information")
             self.switch_to_view("status")
-        elif cmd in ("status", "auth"):
+        elif cmd in ("status",):
             self._update_status_bar()
             self.switch_to_view("status")
-            u, p = get_credentials()
-            _, w_tok = get_water_token()
-            if not w_tok and u and p:
-                self.action_sync_water_in_background(u, p)
+        elif cmd in ("auth", "ehall", "qr", "water-qr"):
+            self.switch_to_view("auth")
+            self.action_start_qr_login_flow()
+        elif cmd in ("cas", "cas-login", "auth-login"):
+            if len(args) >= 2:
+                self.action_submit_cas_password_login(args[0], args[1])
+            else:
+                self.switch_to_view("auth")
         elif cmd in ("plan", "plans", "program", "programs"):
             self.switch_to_view("plan")
             self.action_fetch_plan_data()
@@ -447,12 +452,10 @@ class HrbustTuiApp(App):
                 self.notify("格式错误: read <文章ID> (如: read 5534)", title="参数不足", severity="warning")
             else:
                 self.action_open_article(args[0])
-        elif cmd in ("qr", "water-qr", "auth-qr", "scan"):
-            self.switch_to_view("qr")
-            self.action_start_qr_login_flow()
+
         elif cmd in ("help", "?"):
             self.action_show_home()
-            self.notify("指令: water | room 南一 | today | score | news | read <ID> | qr | login <学号> <密码> | status | exit", title="命令帮助")
+            self.notify("指令: water | room 南一 | today | exam | score | card | plan | news | auth | login <学号> <密码> | status | exit", title="命令帮助")
         else:
             self.notify(f"未识别指令 '{cmd}'，请输入 help 查看可用命令", title="命令提示", severity="warning")
 
@@ -469,16 +472,7 @@ class HrbustTuiApp(App):
         else:
             self.notify("教务在线登录失败：请检查学号密码或内网连接", title="登录失败", severity="error")
 
-        # 同步尝试通过统一身份认证自动激活水控凭据 (方案 1)
-        _, current_tok = get_water_token()
-        if not current_tok:
-            try:
-                auto_water = self.water_svc.auto_auth_and_sync(u, p)
-                if auto_water.get("success"):
-                    self.call_from_thread(self._update_status_bar)
-                    self.notify("✔ 统一身份认证已全自动激活水控凭据！(免抓包)", title="水控自动绑定", severity="information")
-            except Exception:
-                pass
+
 
     @work(thread=True)
     def action_sync_water_in_background(self, u: str, p: str) -> None:
@@ -917,13 +911,11 @@ class HrbustTuiApp(App):
         w_info, w_tok = get_water_token()
         u, _ = get_credentials()
         if not w_tok:
-            self.notify("未检测到水控凭据！请在底部输入 qr 扫码登录或 login 绑定学号", title="需要登录", severity="warning")
-            def _show_no_card():
-                table = self.query_one("#table-card-deck", DataTable)
-                table.clear()
-                table.add_row("-", "-", "未检测到水控凭据，请在底部输入 qr 扫码登录", "-")
-                self.query_one("#card-summary-deck-label", Label).update("⚠️ 请先扫码登录办事大厅同步水控凭据")
-            self.call_from_thread(_show_no_card)
+            def _jump_auth_card():
+                self.switch_to_view("auth")
+                self.action_start_qr_login_flow()
+            self.call_from_thread(_jump_auth_card)
+            self.notify("未检测到网上办事大厅凭据，已为你跳转至办事大厅官方认证中心！", title="需要认证", severity="warning")
             return
 
         account = u or "2306010309"
@@ -1049,6 +1041,47 @@ class HrbustTuiApp(App):
                 status_styled
             )
 
+    @work(thread=True)
+    def action_submit_cas_password_login(self, u: str, p: str) -> None:
+        """后台提交网上办事大厅 / 统一身份认证密码登录"""
+        self.notify(f"正在向统一身份认证中心 (CAS) 提交学号 {u} 凭据...", title="办事大厅认证")
+        def _set_loading():
+            try:
+                self.query_one("#label-cas-submit-status", Label).update("[cyan]⏳ 正在提交统一身份认证中心验明身份...[/cyan]")
+            except Exception:
+                pass
+        self.call_from_thread(_set_loading)
+
+        try:
+            res = self.water_svc.login_by_password(u, p)
+            if res.get("success"):
+                acc = res.get('account') or u
+                def _set_ok():
+                    try:
+                        self.query_one("#label-cas-submit-status", Label).update(f"[bold green]✔ 办事大厅认证成功！已绑定一卡通卡号: {acc}[/bold green]")
+                        self._update_status_bar()
+                    except Exception:
+                        pass
+                self.call_from_thread(_set_ok)
+                self.notify(f"✔ 网上办事大厅认证成功！一卡通卡号: {acc}", title="认证成功", severity="information")
+            else:
+                err = res.get('msg', '未知原因')
+                def _set_fail():
+                    try:
+                        self.query_one("#label-cas-submit-status", Label).update(f"[bold red]❌ 统一认证失败: {err}[/bold red]")
+                    except Exception:
+                        pass
+                self.call_from_thread(_set_fail)
+                self.notify(f"办事大厅登录未通过: {err}", title="认证失败", severity="error")
+        except Exception as e:
+            def _set_exc():
+                try:
+                    self.query_one("#label-cas-submit-status", Label).update(f"[bold red]❌ 认证请求异常: {e}[/bold red]")
+                except Exception:
+                    pass
+            self.call_from_thread(_set_exc)
+            self.notify(f"认证请求异常: {e}", title="认证异常", severity="error")
+
     # ==================== 任务 C: 办事大厅扫码登录 Workers ====================
 
     @work(thread=True)
@@ -1154,6 +1187,13 @@ class HrbustTuiApp(App):
             self.switch_to_view("news")
         elif btn_id == "btn-qr-refresh-deck":
             self.action_start_qr_login_flow()
+        elif btn_id == "btn-cas-submit-deck":
+            u_val = self.query_one("#input-cas-user", Input).value.strip()
+            p_val = self.query_one("#input-cas-pass", Input).value.strip()
+            if not u_val or not p_val:
+                self.notify("请输入办事大厅学号和统一身份认证密码", title="信息不全", severity="warning")
+            else:
+                self.action_submit_cas_password_login(u_val, p_val)
         elif btn_id == "btn-exam-refresh-deck":
             self.action_fetch_exam_data()
         elif btn_id == "btn-card-refresh-deck":

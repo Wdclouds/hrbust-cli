@@ -111,11 +111,22 @@ def delete_password(key: str) -> bool:
     return True
 
 def get_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """获取教务在线 (JWZX) 学号与密码"""
     return get_password("username"), get_password("password")
 
 def set_credentials(u: str, p: str):
+    """保存教务在线 (JWZX) 学号与密码"""
     set_password("username", u)
     set_password("password", p)
+
+def get_cas_credentials() -> Tuple[Optional[str], Optional[str]]:
+    """获取网上办事大厅 / 统一身份认证 (CAS) 学号与密码"""
+    return get_password("cas_username"), get_password("cas_password")
+
+def set_cas_credentials(u: str, p: str):
+    """保存网上办事大厅 / 统一身份认证 (CAS) 学号与密码"""
+    set_password("cas_username", u)
+    set_password("cas_password", p)
 
 def get_water_token() -> Tuple[Optional[str], Optional[str]]:
     return get_password("water_raw_info"), get_password("water_token")
@@ -135,6 +146,8 @@ def set_water_token(arg1: str, arg2: Optional[str] = None):
 def clear_all_credentials():
     delete_password("username")
     delete_password("password")
+    delete_password("cas_username")
+    delete_password("cas_password")
     delete_password("water_raw_info")
     delete_password("water_token")
     if VAULT_FILE.exists():
