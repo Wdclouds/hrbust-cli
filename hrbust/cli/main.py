@@ -283,7 +283,7 @@ def logout():
 @app.command("status")
 def status():
     """检查当前系统登录态与安全凭据存储状态"""
-    from ..core.auth import get_credentials, get_water_token, VAULT_FILE
+    from ..core.auth import get_credentials, get_water_token
     u, p = get_credentials()
     w_info, w_tok = get_water_token()
     
@@ -293,9 +293,18 @@ def status():
     
     table.add_row("教务账号", u if u else "[dim]未配置[/dim]")
     table.add_row("教务密码", "******" if p else "[dim]未配置[/dim]")
-    table.add_row("水控凭据", "已就绪" if (w_info and w_tok) else "[dim]未配置[/dim]")
+
+    if w_info and w_tok:
+        water_desc = "[green]已就绪 (通过统一身份认证全自动激活)[/green]"
+    elif u and p:
+        water_desc = "[yellow]已关联学号 (敲 hrbust water 将全自动激活，免抓包)[/yellow]"
+    else:
+        water_desc = "[dim]未配置 (配置学号密码后将全自动打通)[/dim]"
+
+    table.add_row("水控凭据", water_desc)
     table.add_row("底层存储", "机器特征绑定 AES-256-GCM 密文保险箱 (0600)")
     console.print(table)
+    console.print("[dim]💡 提示: 水控系统已接入学校统一身份认证 (CAS)。直接敲 hrbust water 即可全自动激活出码，无需手动抓包。[/dim]")
 
 def run():
     if len(sys.argv) == 1:

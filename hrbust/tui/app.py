@@ -142,13 +142,14 @@ class HrbustTuiApp(App):
                                 yield Label("🔑 [bold cyan]教务在线 (JWZX) 凭据[/bold cyan]")
                                 yield Label("当前绑定学号: [dim]探测中...[/dim]", id="status-deck-user")
                             with Vertical(classes="panel-box"):
-                                yield Label("💧 [bold cyan]一卡通水控 Token 凭据[/bold cyan]")
+                                yield Label("💧 [bold cyan]一卡通水控凭据 (方案 1 零抓包)[/bold cyan]")
                                 yield Label("水控凭据状态: [dim]探测中...[/dim]", id="status-deck-water")
                             with Vertical(classes="panel-box"):
-                                yield Label("💡 [bold yellow]快捷配置指引[/bold yellow]")
-                                yield Label("• 绑定教务: 底部输入 [bold cyan]login <学号> <密码>[/bold cyan]")
-                                yield Label("• 绑定水控: 底部输入 [bold cyan]token <Token串>[/bold cyan]")
-                                yield Label("• 清空销毁: 底部输入 [bold cyan]logout[/bold cyan]")
+                                yield Label("💡 [bold yellow]全栈凭据配置指引[/bold yellow]")
+                                yield Label("• 全栈一键绑定: 底部输入 [bold cyan]login <学号> <密码>[/bold cyan] (自动同时打通教务与水控，免抓包)")
+                                yield Label("• 水控秒约出码: 绑定学号后输入 [bold cyan]water[/bold cyan] 全自动激活大盘并出码")
+                                yield Label("• 水控手动兜底: 底部输入 [bold cyan]token <Token串>[/bold cyan] (可选，仅在 CAS 异常时手动填)")
+                                yield Label("• 彻底清空销毁: 底部输入 [bold cyan]logout[/bold cyan] (一键销毁本地密文保险箱)")
 
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
@@ -197,7 +198,7 @@ class HrbustTuiApp(App):
     def _update_status_bar(self) -> None:
         """刷新顶部状态指示条"""
         try:
-            u, _ = get_credentials()
+            u, p = get_credentials()
             _, w_tok = get_water_token()
             is_campus = check_campus_network()
             net_text = "🟢 [bold green]已直连校园网[/bold green]" if is_campus else "🟡 [bold yellow]外部网络/代理[/bold yellow]"
@@ -206,11 +207,19 @@ class HrbustTuiApp(App):
             user_text = f"[bold green]{u}[/bold green]" if u else "[dim]未绑定[/dim]"
             self.query_one("#user-status-label", Static).update(f"  |  👤 [bold]学号:[/bold] {user_text}")
 
-            water_text = "[bold green]已就绪[/bold green]" if w_tok else "[dim]未配置[/dim]"
-            self.query_one("#water-status-label", Static).update(f"  |  💧 [bold]水控凭据:[/bold] {water_text}")
+            if w_tok:
+                water_status_text = "[bold green]已就绪[/bold green]"
+                water_deck_desc = "水控凭据状态: [bold green]已就绪 (通过统一身份认证已全自动激活)[/bold green]"
+            elif u and p:
+                water_status_text = "[bold yellow]待激活[/bold yellow]"
+                water_deck_desc = "水控凭据状态: [bold yellow]已关联学号 (切入 water 视图将全自动激活出码，免抓包)[/bold yellow]"
+            else:
+                water_status_text = "[dim]未配置[/dim]"
+                water_deck_desc = "水控凭据状态: [dim]未配置 (在底栏输入 login 绑定学号后全自动激活)[/dim]"
 
+            self.query_one("#water-status-label", Static).update(f"  |  💧 [bold]水控凭据:[/bold] {water_status_text}")
             self.query_one("#status-deck-user", Label).update(f"当前绑定学号: {user_text}")
-            self.query_one("#status-deck-water", Label).update(f"水控凭据状态: {water_text}")
+            self.query_one("#status-deck-water", Label).update(water_deck_desc)
         except Exception:
             pass
 
@@ -327,6 +336,10 @@ class HrbustTuiApp(App):
         elif cmd in ("status", "auth"):
             self._update_status_bar()
             self.switch_to_view("status")
+            u, p = get_credentials()
+            _, w_tok = get_water_token()
+            if not w_tok and u and p:
+                self.action_sync_water_in_background(u, p)
         elif cmd in ("help", "?"):
             self.action_show_home()
             self.notify("指令: water | room 南一 | today | news | login <学号> <密码> | token <Token> | status | logout | exit", title="命令帮助")
@@ -356,6 +369,17 @@ class HrbustTuiApp(App):
                     self.notify("✔ 统一身份认证已全自动激活水控凭据！(免抓包)", title="水控自动绑定", severity="information")
             except Exception:
                 pass
+
+    @work(thread=True)
+    def action_sync_water_in_background(self, u: str, p: str) -> None:
+        """后台静默通过统一身份认证换取水控 Token 并刷新状态"""
+        try:
+            auto_water = self.water_svc.auto_auth_and_sync(u, p)
+            if auto_water.get("success"):
+                self.call_from_thread(self._update_status_bar)
+                self.notify("✔ 统一身份认证已全自动激活水控凭据！(免抓包)", title="水控系统", severity="information")
+        except Exception:
+            pass
 
     @work(thread=True)
     def action_fetch_water_data(self) -> None:
