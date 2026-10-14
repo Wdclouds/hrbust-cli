@@ -57,17 +57,28 @@ def _ensure_auth() -> JwzxEngine:
 def water():
     """浴室与水控：实时机位空闲大盘与交互式数字秒约"""
     _ensure_network()
-    _, token = get_water_token()
+    username, password = get_credentials()
+    water_eng = WaterEngine()
+    svc = WaterService(water_eng)
+
+    raw_info, token = get_water_token()
+    if not token:
+        # 方案 1: 如果已配置学号与密码，优先尝试 CAS 全自动静默换票 (零抓包)
+        if username and password:
+            with console.status("[cyan]正在通过学校统一身份认证 (CAS) 全自动激活水控凭据...[/cyan]"):
+                auto_res = svc.auto_auth_and_sync(username, password)
+            if auto_res.get("success"):
+                console.print("[bold green]✔ 已通过统一身份认证中心全自动激活水控！(免抓包)[/bold green]")
+                raw_info, token = get_water_token()
+            else:
+                console.print(f"[dim]自动激活未完成 ({auto_res.get('msg')})，转入手动模式[/dim]")
+
     if not token:
         token = Prompt.ask("[bold yellow]请输入控水系统 Token[/bold yellow]")
         set_water_token(token)
 
-    username, _ = get_credentials()
     if not username:
         username = Prompt.ask("请输入学号")
-
-    water_eng = WaterEngine()
-    svc = WaterService(water_eng)
 
     with console.status("[cyan]正在获取浴场实时空闲大盘...[/cyan]"):
         try:

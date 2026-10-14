@@ -337,20 +337,43 @@ class HrbustTuiApp(App):
 
     @work(thread=True)
     def action_test_jwzx_login(self, u: str, p: str) -> None:
-        """后台验证教务在线登录态"""
+        """后台验证教务在线登录态并尝试自动打通水控"""
         engine = JwzxEngine()
         success = engine.login(u, p)
         if success:
             self.jwzx_engine = engine
-            self.notify(f"教务系统登录成功！现在可使用 room 或 today 命令", title="登录验证通过", severity="information")
+            self.notify("教务系统登录成功！现在可使用 room 或 today 命令", title="登录验证通过", severity="information")
         else:
             self.notify("教务在线登录失败：请检查学号密码或内网连接", title="登录失败", severity="error")
 
+        # 同步尝试通过统一身份认证自动激活水控凭据 (方案 1)
+        _, current_tok = get_water_token()
+        if not current_tok:
+            try:
+                auto_water = self.water_svc.auto_auth_and_sync(u, p)
+                if auto_water.get("success"):
+                    self.call_from_thread(self._update_status_bar)
+                    self.notify("✔ 统一身份认证已全自动激活水控凭据！(免抓包)", title="水控自动绑定", severity="information")
+            except Exception:
+                pass
+
     @work(thread=True)
     def action_fetch_water_data(self) -> None:
-        """后台拉取水控数据并渲染"""
-        u, _ = get_credentials()
+        """后台拉取水控数据并渲染（含无感自动打通）"""
+        u, p = get_credentials()
         w_info, w_tok = get_water_token()
+
+        if not w_tok and u and p:
+            # 方案 1: 水控未配置时，自动尝试通过 CAS 静默换票
+            try:
+                auto_water = self.water_svc.auto_auth_and_sync(u, p)
+                if auto_water.get("success"):
+                    self.call_from_thread(self._update_status_bar)
+                    self.notify("✔ 统一身份认证已全自动激活水控凭据！", title="水控系统", severity="information")
+                    w_info, w_tok = get_water_token()
+            except Exception:
+                pass
+
         if not w_tok:
             self.notify("未配置水控 Token！可在底部输入 token <你的Token>", title="水控系统", severity="warning")
             def _show_empty_token():

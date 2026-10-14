@@ -5,7 +5,7 @@ HRBUST Toolkit 一卡通水控与洗浴系统底层引擎
 
 import json
 import base64
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple, Optional
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from .network import CampusSession
@@ -124,3 +124,111 @@ class WaterEngine:
             "success": data.get("RetNo") == 0,
             "msg": data.get("RetDsp", "取消操作完成")
         }
+
+    # ==================== 方案 1: CAS 统一认证全自动换票 ====================
+    CAS_URL = "https://auth.hrbust.edu.cn/authserver/login"
+    SERVICE_URL = "https://yktks.hrbust.edu.cn/"
+    SSO_CHECK_URL = "https://yktks.hrbust.edu.cn/accountapi/berserker-base/user/Sso/SsoCheck"
+    PKEY_B64 = "3n4DdO47LWH2Co/WfpbdyA=="
+    SIGN_PASSWORD = "kv7XjPzrDNJY0pdZ#"
+
+    @staticmethod
+    def encrypt_cas_password(password: str, salt: str) -> str:
+        """金智教育 CAS 标准动态加盐 AES-128-CBC 密码加密"""
+        import random
+        aes_chars = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678"
+        plain = "".join(random.choice(aes_chars) for _ in range(64)) + password
+        iv_str = "".join(random.choice(aes_chars) for _ in range(16))
+        key_bytes = salt.strip().encode("utf-8")[:16].ljust(16, b"\0")
+        iv_bytes = iv_str.encode("utf-8")[:16].ljust(16, b"\0")
+        cipher = AES.new(key_bytes, AES.MODE_CBC, iv_bytes)
+        enc = cipher.encrypt(pad(plain.encode("utf-8"), AES.block_size))
+        return base64.b64encode(enc).decode("utf-8")
+
+    def fetch_token_by_cas(self, username: str, password: str) -> Tuple[bool, str, Optional[str], Optional[str]]:
+        """
+        通过哈理工统一身份认证 (CAS) 全自动单点登录并换取水控 Token
+        :return: (is_success, message, token, account)
+        """
+        import datetime
+        import urllib.parse
+        from bs4 import BeautifulSoup
+
+        # 1. 访问 CAS 登录页提取 execution 与动态 salt
+        login_url = f"{self.CAS_URL}?service={urllib.parse.quote(self.SERVICE_URL)}"
+        try:
+            r = self.session.get(login_url, timeout=8)
+            soup = BeautifulSoup(r.text, "html.parser")
+        except Exception as e:
+            return False, f"连接统一身份认证中心异常: {e}", None, None
+
+        exec_tag = soup.find("input", attrs={"name": "execution"})
+        execution = exec_tag.get("value", "e1s1") if exec_tag else "e1s1"
+
+        salt = ""
+        for inp in soup.find_all("input"):
+            if inp.get("id") == "pwdEncryptSalt" and inp.get("value"):
+                salt = str(inp.get("value") or "")
+                break
+
+        if not salt:
+            return False, "未能从 CAS 页面提取到动态加密盐值", None, None
+
+        enc_pwd = self.encrypt_cas_password(password, salt)
+
+        # 2. 提交 CAS 登录表单
+        data = {
+            "username": username,
+            "password": enc_pwd,
+            "execution": execution,
+            "_eventId": "submit",
+            "cllt": "userNameLogin",
+            "dllt": "generalLogin",
+            "lt": "",
+            "rmShown": "1"
+        }
+
+        try:
+            r_post = self.session.post(login_url, data=data, allow_redirects=False, timeout=8)
+        except Exception as e:
+            return False, f"提交 CAS 登录认证异常: {e}", None, None
+
+        loc = r_post.headers.get("Location", "")
+        if "ticket=" not in loc:
+            return False, "CAS 统一认证未通过，请检查学号或统一身份认证密码", None, None
+
+        # 提取 ticket
+        parsed = urllib.parse.urlparse(loc)
+        qs = urllib.parse.parse_qs(parsed.query)
+        ticket = qs.get("ticket", [""])[0]
+
+        # 3. SsoCheck 换取真实一卡通账号 ano
+        try:
+            r_sso = self.session.post(self.SSO_CHECK_URL, data={"ticket": ticket}, timeout=8).json()
+        except Exception as e:
+            return False, f"请求一卡通 SSO 验票接口异常: {e}", None, None
+
+        if r_sso.get("Ret") not in ("0", 0):
+            return False, f"一卡通 SSO 验票失败: {r_sso.get('Msg', '未知错误')}", None, None
+
+        user_info = r_sso.get("User", {})
+        account = str(user_info.get("ACCOUNT", username))
+
+        # 4. 换取专属水控 Token
+        time_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        payload = {
+            "userid": account,
+            "userpassword": self.SIGN_PASSWORD,
+            "time": time_str
+        }
+        enc_info = self.aes_encrypt(json.dumps(payload, separators=(",", ":")), self.PKEY_B64)
+        try:
+            r_tok = self.session.get(f"{self.BASE_URL}/GetToken", params={"info": enc_info}, timeout=8).json()
+        except Exception as e:
+            return False, f"请求水控 GetToken 接口异常: {e}", None, account
+
+        if r_tok.get("RetNo") != 0:
+            return False, f"生成水控 Token 失败: {r_tok.get('RetDsp', '未知错误')}", None, account
+
+        token = r_tok.get("Token")
+        return True, "全自动 CAS 换票成功", token, account

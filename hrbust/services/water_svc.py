@@ -25,3 +25,26 @@ class WaterService:
         payload = {"ano": account, "classno": class_no}
         raw_info = self.engine.aes_encrypt(json.dumps(payload), userid)
         return self.engine.request_book_code(raw_info, token)
+
+    def auto_auth_and_sync(self, username: str, password: str) -> Dict[str, Any]:
+        """
+        通过 CAS 统一身份认证全自动换取水控 Token 并自动加密落盘
+        """
+        success, msg, token, account = self.engine.fetch_token_by_cas(username, password)
+        if success and token:
+            from ..core.auth import set_water_token
+            act = account or username
+            raw_info = self.engine.aes_encrypt(act, act)
+            set_water_token(raw_info, token)
+            return {
+                "success": True,
+                "msg": msg,
+                "token": token,
+                "account": act,
+            }
+        return {
+            "success": False,
+            "msg": msg,
+            "token": None,
+            "account": None,
+        }
