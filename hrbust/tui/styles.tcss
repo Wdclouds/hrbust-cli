@@ -269,3 +269,37 @@ Button.primary {
     height: auto;
     width: 100%;
 }
+
+/* ==================== 任务 B: 文章详情阅读器样式 ==================== */
+#article-scroll-container {
+    height: 1fr;
+    background: #0b0f19;
+    padding: 1 2;
+}
+
+#article-deck-title {
+    color: #38bdf8;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#article-deck-meta {
+    color: #94a3b8;
+    border-bottom: solid #1e293b;
+    padding-bottom: 1;
+    margin-bottom: 1;
+}
+
+#article-deck-content {
+    color: #f1f5f9;
+    margin-bottom: 2;
+}
+
+#article-deck-attachments {
+    color: #facc15;
+    background: #0f172a;
+    border: none;
+    border-left: wide #f59e0b;
+    padding: 1 2;
+    margin-top: 1;
+}

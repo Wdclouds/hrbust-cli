@@ -267,6 +267,89 @@ def daily(
 
     console.print(table)
 
+# ==================== 7. 通告全文阅读 (read) ====================
+@app.command(name="read")
+def read_article(
+    article_id: str = typer.Argument(..., help="公告或新闻的文章 ID（如 5534、5532）"),
+    col: int = typer.Option(354, "--col", "-c", help="栏目 ID (354:教务公告, 355:教学新闻)"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出")
+):
+    """免登录在线阅读校内通告与新闻正文，列出附件下载链接"""
+    _ensure_network()
+    svc = NewsService()
+    with console.status(f"[cyan]正在获取文章 #{article_id} 正文详情...[/cyan]"):
+        art = svc.get_article_detail(article_id, column_id=col)
+
+    if json_mode:
+        import json
+        console.print(json.dumps(art, ensure_ascii=False, indent=2))
+        return
+
+    console.print(Panel(
+        f"[bold white]{art['title']}[/bold white]\n"
+        f"[dim]发布日期: {art.get('date', '未知')}  |  部门: {art.get('department', '教务处')}  |  ID: {article_id}[/dim]",
+        border_style="cyan"
+    ))
+    console.print(art.get("content", ""))
+    attachments = art.get("attachments", [])
+    if attachments:
+        console.print("\n[bold yellow]📎 附件下载列表：[/bold yellow]")
+        for idx, att in enumerate(attachments, 1):
+            console.print(f"  [{idx}] {att['name']}\n      👉 {att['url']}")
+
+# ==================== 8. 个人全科成绩与 GPA (score) ====================
+@app.command(name="score")
+def score(
+    term: str = typer.Option(None, "--term", "-t", help="按学年学期筛选，如 '2024-2025-1'"),
+    json_mode: bool = typer.Option(False, "--json", help="以 JSON 格式输出成绩数据")
+):
+    """查询本科全科学分、各科成绩与加权平均绩点 GPA (moduleId=2020)"""
+    engine = _ensure_auth()
+    from ..services.score_svc import ScoreService
+    svc = ScoreService(engine)
+    with console.status("[cyan]正在拉取全科成绩与 GPA 绩点大盘...[/cyan]"):
+        res = svc.get_scores(term=term)
+
+    if json_mode:
+        import json
+        console.print(json.dumps(res, ensure_ascii=False, indent=2))
+        return
+
+    if res.get("blocked"):
+        console.print(f"[bold yellow][提示] 成绩查询受限: {res.get('reason')}[/bold yellow]")
+        return
+
+    scores = res.get("scores", [])
+    summary = res.get("summary", {})
+
+    table = Table(title=f"哈理工本科成绩大盘 (共 {summary.get('total_courses', len(scores))} 门)", border_style="green")
+    table.add_column("学期", justify="center", style="dim")
+    table.add_column("课程名称", style="bold white")
+    table.add_column("学分", justify="center")
+    table.add_column("平时", justify="center", style="dim")
+    table.add_column("期末", justify="center", style="dim")
+    table.add_column("综合成绩", justify="center", style="bold yellow")
+    table.add_column("绩点", justify="center", style="cyan")
+
+    for s in scores:
+        table.add_row(
+            s.get("term", ""),
+            s.get("course_name", ""),
+            str(s.get("credit", 0.0)),
+            str(s.get("regular_score", "-")),
+            str(s.get("exam_score", "-")),
+            str(s.get("final_score", "")),
+            str(s.get("gpa", 0.0))
+        )
+
+    console.print(table)
+    console.print(
+        f"[bold cyan]📊 学业汇总[/bold cyan]: "
+        f"总学分: [bold green]{summary.get('total_credits')}[/bold green]  |  "
+        f"加权平均分: [bold green]{summary.get('weighted_avg_score')}[/bold green]  |  "
+        f"加权 GPA: [bold yellow on black] {summary.get('gpa')} [/bold yellow on black]"
+    )
+
 @app.command(name="tui")
 def tui():
     """启动 HRBUST 全屏交互式终端中枢大盘 (TUI)"""

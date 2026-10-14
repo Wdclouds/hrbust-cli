@@ -36,6 +36,7 @@ from ..services.water_svc import WaterService
 from ..services.room_svc import RoomService
 from ..services.schedule_svc import ScheduleService
 from ..services.news_svc import NewsService
+from ..services.score_svc import ScoreService
 
 ASCII_LOGO = r"""
 ██╗  ██╗██████╗ ██████╗ ██╗   ██╗███████╗████████╗
@@ -94,8 +95,10 @@ class HrbustTuiApp(App):
                             yield Label("• 💧 浴室水控大盘: 输入 [bold yellow]water[/bold yellow] 查看空闲率并一键秒约出码", classes="guide-item")
                             yield Label("• 🏫 空闲自习教室: 输入 [bold yellow]room 南一[/bold yellow] (加 -m 筛选多媒体机房)", classes="guide-item")
                             yield Label("• 📅 学业今日课表: 输入 [bold yellow]today[/bold yellow] 或 [bold yellow]schedule[/bold yellow] 查看排课矩阵", classes="guide-item")
+                            yield Label("• 📊 个人成绩大盘: 输入 [bold yellow]score[/bold yellow] 查看各科学分与加权平均 GPA", classes="guide-item")
                             yield Label("• 📢 教务公告新闻: 输入 [bold yellow]news[/bold yellow] 或 [bold yellow]notice[/bold yellow] 查看官方通告", classes="guide-item")
-                            yield Label("• 🛡️ 账号凭据保险箱: 输入 [bold yellow]status[/bold yellow] 配置密码 / 输入 [bold yellow]logout[/bold yellow] 登出", classes="guide-item")
+                            yield Label("• 📰 通告正文阅读: 输入 [bold yellow]read <文章ID>[/bold yellow] 或在列表中按 Enter", classes="guide-item")
+                            yield Label("• 🛡️ 账号凭据保险箱: 输入 [bold yellow]status[/bold yellow] / 输入 [bold yellow]logout[/bold yellow] 登出", classes="guide-item")
                             yield Label("• 🏠 返回本主页: 输入 [bold yellow]home[/bold yellow] 或按键盘 [bold yellow]Esc[/bold yellow] 键", classes="guide-item")
 
                     # 2. 浴室水控大盘视图
@@ -151,6 +154,28 @@ class HrbustTuiApp(App):
                                 yield Label("• 水控手动兜底: 底部输入 [bold cyan]token <Token串>[/bold cyan] (可选，仅在 CAS 异常时手动填)")
                                 yield Label("• 彻底清空销毁: 底部输入 [bold cyan]logout[/bold cyan] (一键销毁本地密文保险箱)")
 
+                    # 7. 个人全科成绩与 GPA 大盘视图
+                    with Vertical(id="score-view", classes="view-panel"):
+                        with Horizontal(classes="view-header-bar"):
+                            yield Label("📊 [bold cyan]全科学分与绩点 GPA 大盘[/bold cyan]", classes="view-header-title")
+                            yield Button("🔄 重新拉取", id="btn-score-refresh-deck")
+                            yield Button("🏠 返回主页 (Esc)", id="btn-back-home-6")
+                        with Vertical(classes="voucher-card"):
+                            yield Label("📊 正在统计学业汇总...", id="score-summary-deck-label")
+                        yield DataTable(id="table-score-deck")
+
+                    # 8. 校内公告与新闻正文详情阅读器
+                    with Vertical(id="article-view", classes="view-panel"):
+                        with Horizontal(classes="view-header-bar"):
+                            yield Label("📰 [bold cyan]通告正文详情阅读器[/bold cyan]", classes="view-header-title")
+                            yield Button("⬅️ 返回通告列表", id="btn-article-back-news")
+                            yield Button("🏠 返回主页 (Esc)", id="btn-back-home-7")
+                        with VerticalScroll(id="article-scroll-container"):
+                            yield Label("加载中...", id="article-deck-title")
+                            yield Label("", id="article-deck-meta")
+                            yield Label("", id="article-deck-content")
+                            yield Label("", id="article-deck-attachments")
+
                 # 最下方常驻命令输入条
                 with Horizontal(id="command-container"):
                     yield Static("❯", id="command-prompt-symbol")
@@ -195,6 +220,10 @@ class HrbustTuiApp(App):
         t_news.cursor_type = "row"
         t_news.add_columns("发布日期", "分类", "公告 / 新闻标题", "文章 ID")
 
+        t_score = self.query_one("#table-score-deck", DataTable)
+        t_score.cursor_type = "row"
+        t_score.add_columns("序号", "学年学期", "课程名称", "课程性质", "学分", "平时", "期末", "综合成绩", "绩点")
+
     def _update_status_bar(self) -> None:
         """刷新顶部状态指示条"""
         try:
@@ -225,7 +254,7 @@ class HrbustTuiApp(App):
 
     def switch_to_view(self, target: str) -> None:
         """单页面多视图无缝流转"""
-        views = ["hero", "water", "room", "schedule", "news", "status"]
+        views = ["hero", "water", "room", "schedule", "news", "status", "score", "article"]
         for v in views:
             widget = self.query_one(f"#{v}-view", Vertical)
             widget.display = (v == target)
@@ -340,9 +369,17 @@ class HrbustTuiApp(App):
             _, w_tok = get_water_token()
             if not w_tok and u and p:
                 self.action_sync_water_in_background(u, p)
+        elif cmd in ("score", "scores", "gpa", "grade", "grades"):
+            self.switch_to_view("score")
+            self.action_fetch_score_data()
+        elif cmd == "read":
+            if not args:
+                self.notify("格式错误: read <文章ID> (如: read 5534)", title="参数不足", severity="warning")
+            else:
+                self.action_open_article(args[0])
         elif cmd in ("help", "?"):
             self.action_show_home()
-            self.notify("指令: water | room 南一 | today | news | login <学号> <密码> | token <Token> | status | logout | exit", title="命令帮助")
+            self.notify("指令: water | room 南一 | today | score | news | read <ID> | login <学号> <密码> | status | exit", title="命令帮助")
         else:
             self.notify(f"未识别指令 '{cmd}'，请输入 help 查看可用命令", title="命令提示", severity="warning")
 
@@ -602,16 +639,139 @@ class HrbustTuiApp(App):
                 "教务公告",
                 a.get("title", ""),
                 str(a.get("id", "")),
+                key=str(a.get("id", "")),
             )
 
-    # ==================== 按钮与事件路由 ====================
+    # ==================== 任务 A: 学业成绩大盘 Workers ====================
 
+    @work(thread=True)
+    def action_fetch_score_data(self) -> None:
+        """后台拉取全科成绩与 GPA 汇总"""
+        u, p = get_credentials()
+        if not u or not p:
+            self.notify("未绑定教务账号！请在底部输入: login <学号> <密码>", title="需要登录", severity="warning")
+            def _show_no_score():
+                table = self.query_one("#table-score-deck", DataTable)
+                table.clear()
+                table.add_row("-", "-", "未绑定教务账号，请在底部键入: login <学号> <密码>", "-", "-", "-", "-", "-", "-")
+                self.query_one("#score-summary-deck-label", Label).update("⚠️ 请先绑定教务账号后查看成绩大盘")
+            self.call_from_thread(_show_no_score)
+            return
+
+        self.notify("正在登录教务在线检索全科成绩...", title="学业大盘")
+        try:
+            if not self.jwzx_engine:
+                self.jwzx_engine = JwzxEngine()
+                if not self.jwzx_engine.login(u, p):
+                    self.notify("教务在线自动打码登录失败", severity="error")
+                    def _show_login_fail():
+                        table = self.query_one("#table-score-deck", DataTable)
+                        table.clear()
+                        table.add_row("!", "-", "教务在线登录失败，请检查账号密码或验证码", "-", "-", "-", "-", "-", "-")
+                    self.call_from_thread(_show_login_fail)
+                    return
+
+            svc = ScoreService(self.jwzx_engine)
+            res = svc.get_scores()
+            self.call_from_thread(self._populate_score_table, res)
+            if res.get("blocked"):
+                self.notify(f"成绩受限: {res.get('reason')}", severity="warning")
+            else:
+                summary = res.get("summary", {})
+                self.notify(f"成绩同步完成！总学分: {summary.get('total_credits')} | GPA: {summary.get('gpa')}", title="学业成绩", severity="information")
+        except Exception as e:
+            self.notify(f"拉取成绩失败: {e}", severity="error")
+            def _show_fetch_err():
+                table = self.query_one("#table-score-deck", DataTable)
+                table.clear()
+                table.add_row("!", "-", f"拉取成绩失败: {e}", "-", "-", "-", "-", "-", "-")
+            self.call_from_thread(_show_fetch_err)
+
+    def _populate_score_table(self, res: Dict[str, Any]) -> None:
+        table = self.query_one("#table-score-deck", DataTable)
+        summary_lbl = self.query_one("#score-summary-deck-label", Label)
+        table.clear()
+
+        if res.get("blocked"):
+            summary_lbl.update(f"⚠️ [bold yellow]{res.get('reason')}[/bold yellow]")
+            table.add_row("!", "-", "成绩查看受限（教务处未评教拦截）", "-", "-", "-", "-", "-", "-")
+            return
+
+        scores = res.get("scores", [])
+        summary = res.get("summary", {})
+
+        summary_lbl.update(
+            f"📊 [bold cyan]学业总评[/bold cyan]  |  "
+            f"总修读: [bold green]{summary.get('total_courses', len(scores))} 门[/bold green]  |  "
+            f"已获学分: [bold green]{summary.get('total_credits', 0.0)}[/bold green]  |  "
+            f"加权平均分: [bold green]{summary.get('weighted_avg_score', 0.0)}[/bold green]  |  "
+            f"官方加权 GPA: [bold yellow on black]  {summary.get('gpa', 0.0)}  [/bold yellow on black]"
+        )
+
+        for idx, s in enumerate(scores, 1):
+            table.add_row(
+                str(idx),
+                s.get("term", ""),
+                s.get("course_name", ""),
+                s.get("category", "必修"),
+                str(s.get("credit", 0.0)),
+                str(s.get("regular_score", "-")),
+                str(s.get("exam_score", "-")),
+                f"[bold yellow]{s.get('final_score', '')}[/bold yellow]",
+                f"[bold cyan]{s.get('gpa', 0.0)}[/bold cyan]"
+            )
+
+    # ==================== 任务 B: 通告正文阅读器 Workers ====================
+
+    @work(thread=True)
+    def action_open_article(self, article_id: str, col: int = 354) -> None:
+        """后台拉取文章正文并切入详情阅读器"""
+        self.call_from_thread(self.switch_to_view, "article")
+        self.notify(f"正在拉取文章 #{article_id} 正文...", title="阅读器")
+        try:
+            art = self.news_svc.get_article_detail(article_id, column_id=col)
+            self.call_from_thread(self._render_article_detail, art)
+        except Exception as e:
+            self.notify(f"加载正文失败: {e}", severity="error")
+
+    def _render_article_detail(self, art: Dict[str, Any]) -> None:
+        title_lbl = self.query_one("#article-deck-title", Label)
+        meta_lbl = self.query_one("#article-deck-meta", Label)
+        body_lbl = self.query_one("#article-deck-content", Label)
+        att_lbl = self.query_one("#article-deck-attachments", Label)
+
+        title_lbl.update(f"[bold cyan]{art.get('title', '')}[/bold cyan]")
+        meta_lbl.update(
+            f"📅 发布时间: [dim]{art.get('date', '未知')}[/dim]  |  "
+            f"🏛️ 来源部门: [dim]{art.get('department', '教务处')}[/dim]  |  "
+            f"🆔 文章 ID: [dim]{art.get('id', '')}[/dim]"
+        )
+        body_lbl.update(art.get("content", "[dim]该通告暂无正文文本[/dim]"))
+
+        atts = art.get("attachments", [])
+        if atts:
+            att_lines = ["[bold yellow]📎 附件下载列表：[/bold yellow]"]
+            for idx, a in enumerate(atts, 1):
+                att_lines.append(f"  [{idx}] {a.get('name', '附件')}\n      👉 {a.get('url', '')}")
+            att_lbl.update("\n".join(att_lines))
+        else:
+            att_lbl.update("[dim]（本文无附加下载文件）[/dim]")
+
+    # ==================== 按钮与事件路由 ====================\n
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id
         if btn_id == "btn-sidebar-refresh":
             self.action_load_sidebar_news()
             self.notify("正在刷新右侧校园动态...", severity="information")
-        elif btn_id in ("btn-back-home-1", "btn-back-home-2", "btn-back-home-3", "btn-back-home-4", "btn-back-home-5"):
+        elif btn_id in (
+            "btn-back-home-1",
+            "btn-back-home-2",
+            "btn-back-home-3",
+            "btn-back-home-4",
+            "btn-back-home-5",
+            "btn-back-home-6",
+            "btn-back-home-7",
+        ):
             self.action_show_home()
         elif btn_id == "btn-water-refresh-deck":
             self.action_fetch_water_data()
@@ -621,10 +781,18 @@ class HrbustTuiApp(App):
             self.action_fetch_schedule_data()
         elif btn_id == "btn-news-refresh-deck":
             self.action_fetch_news_data()
+        elif btn_id == "btn-score-refresh-deck":
+            self.action_fetch_score_data()
+        elif btn_id == "btn-article-back-news":
+            self.switch_to_view("news")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "table-water-deck":
             self.action_book_water_from_deck()
+        elif event.data_table.id == "table-news-deck":
+            row_key = event.row_key.value
+            if row_key and row_key.isdigit():
+                self.action_open_article(row_key)
 
     def action_refresh_active(self) -> None:
         """刷新当前激活的视图"""
@@ -634,6 +802,8 @@ class HrbustTuiApp(App):
             self.action_fetch_news_data()
         elif self.active_view == "schedule":
             self.action_fetch_schedule_data()
+        elif self.active_view == "score":
+            self.action_fetch_score_data()
         self.action_load_sidebar_news()
         self._update_status_bar()
         self.notify("当前数据已刷新", severity="information")

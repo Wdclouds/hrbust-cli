@@ -144,3 +144,67 @@ def test_water_service_auto_auth_and_sync_contract(tmp_path, monkeypatch):
     # 验证本地已自动持久化落盘
     _, saved_token = auth.get_water_token()
     assert saved_token == "tok_synced_999"
+
+def test_news_service_get_article_detail_mock():
+    from hrbust.services.news_svc import NewsService
+    svc = NewsService()
+    mock_html = """
+    <html>
+      <h2>第23届全国大学生信息安全对抗通知</h2>
+      <p>来源：教务处 2026-10-10</p>
+      <div id="article-content">
+        <p>为贯彻落实网络安全战略，组织校内选拔。</p>
+        <p>一、参赛对象：在校本科生。</p>
+        <a href="/homepage/downloadTheolFile.do?id=ABCDEF&fileName=test.docx">附件1：校赛报名表.docx</a>
+      </div>
+    </html>
+    """
+    mock_resp = MagicMock()
+    mock_resp.content = mock_html.encode("utf-8")
+    svc.session.get = MagicMock(return_value=mock_resp)
+
+    res = svc.get_article_detail("5532", column_id=354)
+    assert res["id"] == "5532"
+    assert "信息安全" in res["title"]
+    assert "参赛对象" in res["content"]
+    assert len(res["attachments"]) == 1
+    assert "校赛报名表" in res["attachments"][0]["name"]
+    assert "downloadTheolFile.do" in res["attachments"][0]["url"]
+
+def test_score_service_calculation_and_blocked():
+    from hrbust.services.score_svc import ScoreService
+    from bs4 import BeautifulSoup
+
+    mock_engine = MagicMock()
+    svc = ScoreService(mock_engine)
+
+    # 1. 模拟未评教拦截
+    mock_blocked_html = "<html><body>您尚未完成本学期网上教学评价，不能查看成绩！</body></html>"
+    mock_engine.access_module.return_value = "http://fake_url"
+    mock_engine.get_page.return_value = BeautifulSoup(mock_blocked_html, "html.parser")
+
+    res_blocked = svc.get_scores()
+    assert res_blocked["blocked"] is True
+    assert "未完成" in res_blocked["reason"]
+
+    # 2. 模拟正常成绩表格与 GPA 汇总计算
+    mock_score_html = """
+    <html>
+      <table>
+        <tr><th>学年学期</th><th>课程代码</th><th>课程名称</th><th>课程性质</th><th>学分</th><th>平时</th><th>期末</th><th>综合成绩</th><th>绩点</th></tr>
+        <tr><td>2024-2025-1</td><td>001</td><td>高等数学</td><td>必修</td><td>5.0</td><td>90</td><td>80</td><td>85</td><td>3.5</td></tr>
+        <tr><td>2024-2025-1</td><td>002</td><td>大学英语</td><td>必修</td><td>3.0</td><td>95</td><td>95</td><td>95</td><td>4.5</td></tr>
+      </table>
+    </html>
+    """
+    mock_engine.get_page.return_value = BeautifulSoup(mock_score_html, "html.parser")
+    res_normal = svc.get_scores()
+    assert res_normal["blocked"] is False
+    assert len(res_normal["scores"]) == 2
+    summary = res_normal["summary"]
+    assert summary["total_credits"] == 8.0
+    # 加权均分: (85*5 + 95*3) / 8 = (425 + 285) / 8 = 710 / 8 = 88.75
+    assert summary["weighted_avg_score"] == 88.75
+    # 加权 GPA: (3.5*5 + 4.5*3) / 8 = (17.5 + 13.5) / 8 = 31 / 8 = 3.88
+    assert summary["gpa"] == 3.88
+
